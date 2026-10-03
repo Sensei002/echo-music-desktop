@@ -31,4 +31,3 @@ reqwest.workspace = true
 parking_lot.workspace = true
 once_cell.workspace = true
 chrono.workspace = true
-chrono.workspace = true
