@@ -1,0 +1,188 @@
+name: Release
+
+# Publishes a GitHub Release every time a `v*` tag is pushed. The tag is the
+# version — for example `v1.4.0` produces release `v1.4.0` with packaged
+# binaries for Windows, macOS and Linux.
+#
+# Cut a release with:
+#   git tag v1.4.0 && git push origin v1.4.0
+#
+# You can also run this workflow manually from the Actions tab and supply the
+# version; it will create the tag for you.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v1.4.0 (a tag will be created)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build a packaged artifact for each platform.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+            ext: .exe
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+            ext: ""
+          - os: macos-14
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+            ext: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libasound2-dev libfontconfig1-dev libxkbcommon-dev \
+            libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
+            libxcb-randr0-dev libxcb-composite0-dev libxcb-keysyms1-dev \
+            libxcb-image0-dev libxcb-icccm4-dev libxcb-xkb-dev \
+            libxkbcommon-x11-dev libgl1-mesa-dev libegl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p echo-app
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          BIN="target/${{ matrix.target }}/release/echo-music-desktop"
+          STAGE="echo-music-desktop-${VERSION}-${{ matrix.label }}"
+          mkdir -p "$STAGE"
+          cp "$BIN" "$STAGE/"
+          cp README.md LICENSE "$STAGE/" 2>/dev/null || true
+          cp -r assets "$STAGE/assets" 2>/dev/null || true
+          tar -czf "${STAGE}.tar.gz" "$STAGE"
+          echo "ARTIFACT=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          BIN="target/${{ matrix.target }}/release/echo-music-desktop.exe"
+          STAGE="echo-music-desktop-${VERSION}-${{ matrix.label }}"
+          mkdir -p "$STAGE"
+          cp "$BIN" "$STAGE/"
+          cp README.md LICENSE "$STAGE/" 2>/dev/null || true
+          cp -r assets "$STAGE/assets" 2>/dev/null || true
+          7z a "${STAGE}.zip" "$STAGE" > /dev/null
+          echo "ARTIFACT=${STAGE}.zip" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Publish the release and attach every packaged artifact.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Echo Music Desktop ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: dist/*
+          body: |
+            ## Echo Music Desktop ${{ steps.version.outputs.tag }}
+
+            Ad-free YouTube Music streaming, synced lyrics and offline playback —
+            the desktop port of [Echo Music](https://github.com/EchoMusicApp/Echo-Music).
+
+            ### Downloads
+            | Platform | File |
+            |---|---|
+            | Windows (x64) | `echo-music-desktop-*-windows-x86_64.zip` |
+            | Linux (x64) | `echo-music-desktop-*-linux-x86_64.tar.gz` |
+            | macOS (Apple Silicon) | `echo-music-desktop-*-macos-aarch64.tar.gz` |
+            | macOS (Intel) | `echo-music-desktop-*-macos-x86_64.tar.gz` |
+
+            ### Running
+            Extract the archive and launch `echo-music-desktop`. On Linux you may
+            need `libasound2` and `libfontconfig1` from your distribution.
+
+            > Echo Music hosts no copyrighted material. It is a client that streams
+            > publicly available YouTube Music content. Support the artists you love
+            > by subscribing to YouTube Premium.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

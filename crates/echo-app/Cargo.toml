@@ -1,0 +1,34 @@
+[package]
+name = "echo-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Echo Music Desktop application (Slint UI)."
+
+[[bin]]
+name = "echo-music-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dependencies]
+echo-core.workspace = true
+echo-innertube.workspace = true
+echo-playback.workspace = true
+echo-lyrics.workspace = true
+
+slint.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+reqwest.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+chrono.workspace = true
+chrono.workspace = true

@@ -1,0 +1,158 @@
+// Echo Music Desktop — Library.
+//
+// Mirrors the upstream library screen: a segmented tab row, the quick-access
+// grid (Liked / Downloaded / Exported / Cached / Top 50 / Bottom 50 / Local)
+// and the collection grids beneath.
+
+import { Theme } from "../theme.slint";
+import { GroupedCard, MediaTile, QuickAction, SectionHeader, SongData, SongRow, TileData } from "../components.slint";
+
+export component LibraryScreen inherits Rectangle {
+    in property <int> current-tab: 0;
+    in property <[string]> tabs: ["Playlists", "Songs", "Albums", "Artists", "Local"];
+    in property <[QuickAction]> quick-actions: [];
+    in property <[SongData]> songs: [];
+    in property <[TileData]> collections: [];
+    in property <string> collections-title: "Playlists";
+    in property <string> status: "";
+
+    callback tab-selected(int);
+    callback quick-action(string);
+    callback song-activated(string);
+    callback collection-activated(string, string);
+    callback create-playlist();
+
+    background: Theme.background;
+
+    VerticalLayout {
+        spacing: 12px;
+        padding-left: Theme.page-padding;
+        padding-right: Theme.page-padding;
+        padding-top: 6px;
+
+        // ---- segmented tabs --------------------------------------------
+        ScrollView {
+            height: 36px;
+            horizontal-scrollbar-policy: always-off;
+            vertical-scrollbar-policy: always-off;
+            HorizontalLayout {
+                spacing: 8px;
+                for tab[index] in root.tabs : Rectangle {
+                    height: 34px;
+                    width: tab-label.preferred-width + 28px;
+                    border-radius: Theme.radius-pill;
+                    background: index == root.current-tab ? Theme.primary : Theme.chip;
+                    animate background { duration: 160ms; }
+
+                    tab-label := Text {
+                        text: tab;
+                        color: index == root.current-tab ? Theme.on-primary : Theme.on-surface-variant;
+                        font-size: Theme.font-label;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+
+                    TouchArea {
+                        clicked => { root.tab-selected(index); }
+                    }
+                }
+            }
+        }
+
+        ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            horizontal-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                spacing: 18px;
+                padding-bottom: 16px;
+
+                // ---- quick access grid ----------------------------------
+                if root.quick-actions.length > 0 : GridLayout {
+                    spacing: 10px;
+                    for action[index] in root.quick-actions : Rectangle {
+                        row: index / 2;
+                        col: index % 2;
+                        height: 52px;
+                        border-radius: Theme.radius-tile;
+                        background: quick-touch.has-hover ? Theme.surface-container-high : Theme.chip;
+                        animate background { duration: 140ms; }
+
+                        quick-touch := TouchArea {
+                            clicked => { root.quick-action(action.id); }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 10px;
+                            Text {
+                                text: action.glyph;
+                                color: Theme.on-surface;
+                                font-size: 17px;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: action.label;
+                                color: Theme.on-surface;
+                                font-size: Theme.font-body;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: action.count;
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-micro;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                if root.status != "" : Text {
+                    text: root.status;
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label;
+                    horizontal-alignment: center;
+                }
+
+                // ---- songs list ------------------------------------------
+                if root.current-tab == 1 && root.songs.length > 0 : GroupedCard {
+                    content-height: root.songs.length * 66px + 10px;
+                    for song[index] in root.songs : SongRow {
+                        song: song;
+                        show-index: true;
+                        index: index;
+                        activated => { root.song-activated(song.id); }
+                    }
+                }
+
+                // ---- collection grid --------------------------------------
+                if root.current-tab != 1 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader {
+                        title: root.collections-title;
+                        action: root.current-tab == 0 ? "+ New" : "";
+                        action-clicked => { root.create-playlist(); }
+                    }
+                    GridLayout {
+                        spacing: 14px;
+                        for item[index] in root.collections : MediaTile {
+                            row: index / 3;
+                            col: index % 3;
+                            tile: item;
+                            tile-width: 140px;
+                            activated => { root.collection-activated(item.id, item.kind); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

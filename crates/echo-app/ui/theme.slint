@@ -1,0 +1,73 @@
+// Echo Music Desktop — design tokens.
+//
+// Ported from the upstream DESIGN.md: a Material-3 derived tonal palette seeded
+// from #ED5564, translucent "liquid glass" surfaces, pill-shaped controls and
+// generous 24px corner radii. Every value here is overwritten from Rust at
+// startup using the user's chosen accent colour, so the palette stays in sync
+// with the settings screen.
+
+export global Theme {
+    // ---- accent / primary --------------------------------------------------
+    in-out property <color> primary: #ffb2b7;
+    in-out property <color> on-primary: #5f1120;
+    in-out property <color> primary-container: #7e2a35;
+    in-out property <color> on-primary-container: #ffdadc;
+
+    // ---- secondary ---------------------------------------------------------
+    in-out property <color> secondary: #e7bdc0;
+    in-out property <color> on-secondary: #44292c;
+    in-out property <color> secondary-container: #5d3f42;
+    in-out property <color> on-secondary-container: #ffdadc;
+
+    // ---- tertiary ----------------------------------------------------------
+    in-out property <color> tertiary: #e5c08b;
+    in-out property <color> on-tertiary: #422c06;
+    in-out property <color> tertiary-container: #5b421a;
+    in-out property <color> on-tertiary-container: #ffdea8;
+
+    // ---- status ------------------------------------------------------------
+    in-out property <color> error: #ffb4ab;
+    in-out property <color> on-error: #690005;
+
+    // ---- surfaces ----------------------------------------------------------
+    in-out property <color> background: #1a1112;
+    in-out property <color> on-background: #f0dede;
+    in-out property <color> surface: #1a1112;
+    in-out property <color> on-surface: #f0dede;
+    in-out property <color> surface-variant: #534345;
+    in-out property <color> on-surface-variant: #d8c2c4;
+    in-out property <color> surface-container-lowest: #140c0d;
+    in-out property <color> surface-container-low: #22191a;
+    in-out property <color> surface-container: #271d1e;
+    in-out property <color> surface-container-high: #322828;
+    in-out property <color> surface-container-highest: #3d3233;
+    in-out property <color> outline: #a08c8e;
+    in-out property <color> outline-variant: #534345;
+    in-out property <color> inverse-surface: #f0dede;
+    in-out property <color> inverse-on-surface: #382e2f;
+
+    // ---- translucent surfaces (the signature Echo look) ---------------------
+    // Cards are `surfaceVariant` at ~30% opacity rather than a solid container.
+    // Slint writes 8-digit hex as #AARRGGBB, so the alpha byte comes first.
+    in-out property <color> card: #4d534345;
+    in-out property <color> chip: #59534345;
+    in-out property <color> chip-selected: #ffb2b7;
+    in-out property <color> glass: #8c271d1e;
+    in-out property <color> glass-strong: #d9271d1e;
+    in-out property <color> scrim: #99000000;
+
+    // ---- geometry ----------------------------------------------------------
+    in-out property <length> radius-card: 24px;
+    in-out property <length> radius-tile: 18px;
+    in-out property <length> radius-pill: 999px;
+    in-out property <length> gap: 12px;
+    in-out property <length> page-padding: 20px;
+
+    // ---- typography --------------------------------------------------------
+    in-out property <length> font-hero: 30px;
+    in-out property <length> font-display: 24px;
+    in-out property <length> font-title: 17px;
+    in-out property <length> font-body: 14px;
+    in-out property <length> font-label: 12px;
+    in-out property <length> font-micro: 11px;
+}

@@ -1,0 +1,214 @@
+// Echo Music Desktop — Search.
+//
+// A pill search field, suggestion list, and grouped results (songs, videos,
+// albums, artists, playlists) exactly as the upstream search screen presents
+// them.
+
+import { Theme } from "../theme.slint";
+import { GroupedCard, MediaTile, SectionHeader, SongData, SongRow, TileData } from "../components.slint";
+
+export component SearchScreen inherits Rectangle {
+    in property <string> query: "";
+    in property <[string]> suggestions: [];
+    in property <[SongData]> songs: [];
+    in property <[SongData]> videos: [];
+    in property <[TileData]> albums: [];
+    in property <[TileData]> artists: [];
+    in property <[TileData]> playlists: [];
+    in property <bool> searching: false;
+    in property <string> status: "";
+
+    callback query-edited(string);
+    callback submit(string);
+    callback suggestion-chosen(string);
+    callback song-activated(string);
+    callback tile-activated(string, string);
+
+    background: Theme.background;
+
+    VerticalLayout {
+        spacing: 12px;
+        padding-left: Theme.page-padding;
+        padding-right: Theme.page-padding;
+        padding-top: 6px;
+
+        // ---- search field ----------------------------------------------
+        Rectangle {
+            height: 48px;
+            border-radius: Theme.radius-pill;
+            background: Theme.chip;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 10px;
+
+                Text {
+                    text: "⌕";
+                    color: Theme.on-surface-variant;
+                    font-size: 18px;
+                    vertical-alignment: center;
+                }
+
+                field := TextInput {
+                    placeholder-text: "Search YouTube Music…";
+                    single-line: true;
+                    text: root.query;
+                    color: Theme.on-surface;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    edited(text) => { root.query-edited(text); }
+                    accepted => { root.submit(field.text); }
+                }
+
+                Text {
+                    text: "✕";
+                    color: Theme.on-surface-variant;
+                    font-size: 15px;
+                    vertical-alignment: center;
+                    visible: root.query != "";
+                    TouchArea {
+                        clicked => { root.submit(""); }
+                    }
+                }
+            }
+        }
+
+        // ---- suggestions ------------------------------------------------
+        if root.suggestions.length > 0 && root.songs.length == 0 && !root.searching : GroupedCard {
+            content-height: root.suggestions.length * 46px + 10px;
+            for suggestion[index] in root.suggestions : Rectangle {
+                height: 44px;
+                border-radius: Theme.radius-tile;
+                background: suggestion-touch.has-hover ? Theme.chip : transparent;
+                animate background { duration: 120ms; }
+
+                suggestion-touch := TouchArea {
+                    clicked => { root.suggestion-chosen(suggestion); }
+                }
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 10px;
+                    Text {
+                        text: "⌕";
+                        color: Theme.on-surface-variant;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: suggestion;
+                        color: Theme.on-surface;
+                        font-size: Theme.font-body;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        if root.searching : Text {
+            text: "Searching…";
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            horizontal-alignment: center;
+        }
+
+        if root.status != "" : Text {
+            text: root.status;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            horizontal-alignment: center;
+        }
+
+        // ---- results ----------------------------------------------------
+        ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            horizontal-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                spacing: 18px;
+                padding-bottom: 16px;
+
+                if root.songs.length > 0 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader { title: "Songs"; }
+                    GroupedCard {
+                        content-height: root.songs.length * 66px + 10px;
+                        for song[index] in root.songs : SongRow {
+                            song: song;
+                            activated => { root.song-activated(song.id); }
+                        }
+                    }
+                }
+
+                if root.videos.length > 0 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader { title: "Videos"; }
+                    GroupedCard {
+                        content-height: root.videos.length * 66px + 10px;
+                        for song[index] in root.videos : SongRow {
+                            song: song;
+                            activated => { root.song-activated(song.id); }
+                        }
+                    }
+                }
+
+                if root.albums.length > 0 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader { title: "Albums"; }
+                    ScrollView {
+                        height: 214px;
+                        horizontal-scrollbar-policy: always-off;
+                        vertical-scrollbar-policy: always-off;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            for item[item-index] in root.albums : MediaTile {
+                                tile: item;
+                                activated => { root.tile-activated(item.id, item.kind); }
+                            }
+                        }
+                    }
+                }
+
+                if root.artists.length > 0 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader { title: "Artists"; }
+                    ScrollView {
+                        height: 214px;
+                        horizontal-scrollbar-policy: always-off;
+                        vertical-scrollbar-policy: always-off;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            for item[item-index] in root.artists : MediaTile {
+                                tile: item;
+                                activated => { root.tile-activated(item.id, item.kind); }
+                            }
+                        }
+                    }
+                }
+
+                if root.playlists.length > 0 : VerticalLayout {
+                    spacing: 10px;
+                    SectionHeader { title: "Playlists"; }
+                    ScrollView {
+                        height: 214px;
+                        horizontal-scrollbar-policy: always-off;
+                        vertical-scrollbar-policy: always-off;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            for item[item-index] in root.playlists : MediaTile {
+                                tile: item;
+                                activated => { root.tile-activated(item.id, item.kind); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

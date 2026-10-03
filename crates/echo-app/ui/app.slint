@@ -1,0 +1,269 @@
+// Echo Music Desktop — application shell.
+//
+// Composes the three tabs, the floating navigation bar, the persistent mini
+// player and the full-screen overlays (player and settings). All state is owned
+// by Rust; this file is purely presentational and forwards every interaction
+// through a callback.
+
+// Re-exported so the Rust side can drive the palette through the global.
+export { Theme } from "theme.slint";
+import {
+    EqBandData, LyricLineData, MiniPlayer, QuickAction, SettingRow, ShelfData,
+    SongData, TabBar, TileData, TopBar,
+} from "components.slint";
+import { HomeScreen } from "screens/home.slint";
+import { SearchScreen } from "screens/search.slint";
+import { LibraryScreen } from "screens/library.slint";
+import { PlayerScreen } from "screens/player.slint";
+import { SettingsScreen } from "screens/settings.slint";
+
+export component AppWindow inherits Window {
+    title: "Echo Music";
+    background: Theme.background;
+    default-font-size: 14px;
+    min-width: 460px;
+    min-height: 640px;
+    width: 480px;
+    height: 860px;
+
+    // ---- navigation ------------------------------------------------------
+    in-out property <int> current-tab: 0;
+    in-out property <bool> player-open: false;
+    in-out property <bool> settings-open: false;
+
+    // ---- home ------------------------------------------------------------
+    in-out property <string> greeting: "Good evening";
+    in-out property <[string]> chips: [];
+    in-out property <int> selected-chip: -1;
+    in-out property <[ShelfData]> shelves: [];
+    in-out property <[SongData]> favorites: [];
+    in-out property <string> favorites-title: "Forgotten favourites";
+
+    // ---- search ----------------------------------------------------------
+    in-out property <string> search-query: "";
+    in-out property <[string]> suggestions: [];
+    in-out property <[SongData]> search-songs: [];
+    in-out property <[SongData]> search-videos: [];
+    in-out property <[TileData]> search-albums: [];
+    in-out property <[TileData]> search-artists: [];
+    in-out property <[TileData]> search-playlists: [];
+    in-out property <bool> searching: false;
+
+    // ---- library ---------------------------------------------------------
+    in-out property <int> library-tab: 0;
+    in-out property <[QuickAction]> quick-actions: [];
+    in-out property <[SongData]> library-songs: [];
+    in-out property <[TileData]> library-collections: [];
+    in-out property <string> library-title: "Playlists";
+
+    // ---- player ----------------------------------------------------------
+    in-out property <bool> has-track: false;
+    in-out property <SongData> now-playing;
+    in-out property <bool> is-playing: false;
+    in-out property <float> progress: 0.0;
+    in-out property <string> position-label: "0:00";
+    in-out property <string> duration-label: "0:00";
+    in-out property <bool> shuffle: false;
+    in-out property <int> repeat-mode: 0;
+    in-out property <[LyricLineData]> lyrics: [];
+    in-out property <string> lyrics-source: "";
+    in-out property <bool> lyrics-visible: true;
+
+    // ---- settings --------------------------------------------------------
+    in-out property <[SettingRow]> settings-appearance: [];
+    in-out property <[SettingRow]> settings-playback: [];
+    in-out property <[SettingRow]> settings-lyrics: [];
+    in-out property <[SettingRow]> settings-extras: [];
+    in-out property <[EqBandData]> eq-bands: [];
+    in-out property <bool> eq-enabled: false;
+    in-out property <string> provider-order: "";
+    in-out property <string> app-version: "";
+
+    // ---- shared status ---------------------------------------------------
+    in-out property <string> status: "";
+    in-out property <bool> loading: false;
+
+    // ---- callbacks: navigation -------------------------------------------
+    callback tab-selected(int);
+    callback close-player();
+    callback open-player();
+    callback close-settings();
+    callback open-settings();
+
+    // ---- callbacks: home --------------------------------------------------
+    callback chip-selected(int);
+    callback shelf-item-clicked(string, string);
+    callback home-play-all(string, string);
+
+    // ---- callbacks: search ------------------------------------------------
+    callback search-edited(string);
+    callback search-submit(string);
+    callback suggestion-chosen(string);
+
+    // ---- callbacks: library ------------------------------------------------
+    callback library-tab-selected(int);
+    callback quick-action(string);
+    callback create-playlist();
+
+    // ---- callbacks: playback ----------------------------------------------
+    callback song-activated(string);
+    callback toggle-play();
+    callback play-next();
+    callback play-previous();
+    callback seek(float);
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback toggle-like();
+    callback toggle-download();
+    callback toggle-lyrics();
+    callback open-lyrics-source();
+
+    // ---- callbacks: settings ----------------------------------------------
+    callback setting-toggled(string, bool);
+    callback setting-activated(string);
+    callback eq-toggled(bool);
+    callback eq-band-changed(int, float);
+    callback reset-eq();
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Theme.background;
+
+        // ---- main column -------------------------------------------------
+        VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+
+            TopBar {
+                title: root.current-tab == 0 ? "Echo Music" : (root.current-tab == 1 ? "Search" : "Library");
+                search-clicked => { root.tab-selected(1); }
+                settings-clicked => { root.open-settings(); }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.background;
+
+                if root.current-tab == 0 : HomeScreen {
+                    width: parent.width;
+                    height: parent.height;
+                    greeting: root.greeting;
+                    chips: root.chips;
+                    selected-chip: root.selected-chip;
+                    shelves: root.shelves;
+                    favorites: root.favorites;
+                    favorites-title: root.favorites-title;
+                    loading: root.loading;
+                    status: root.status;
+                    chip-selected(index) => { root.chip-selected(index); }
+                    shelf-item-clicked(id, kind) => { root.shelf-item-clicked(id, kind); }
+                    song-activated(id) => { root.song-activated(id); }
+                    play-all(title, kind) => { root.home-play-all(title, kind); }
+                }
+
+                if root.current-tab == 1 : SearchScreen {
+                    width: parent.width;
+                    height: parent.height;
+                    query: root.search-query;
+                    suggestions: root.suggestions;
+                    songs: root.search-songs;
+                    videos: root.search-videos;
+                    albums: root.search-albums;
+                    artists: root.search-artists;
+                    playlists: root.search-playlists;
+                    searching: root.searching;
+                    status: root.status;
+                    query-edited(text) => { root.search-edited(text); }
+                    submit(text) => { root.search-submit(text); }
+                    suggestion-chosen(text) => { root.suggestion-chosen(text); }
+                    song-activated(id) => { root.song-activated(id); }
+                    tile-activated(id, kind) => { root.shelf-item-clicked(id, kind); }
+                }
+
+                if root.current-tab == 2 : LibraryScreen {
+                    width: parent.width;
+                    height: parent.height;
+                    current-tab: root.library-tab;
+                    quick-actions: root.quick-actions;
+                    songs: root.library-songs;
+                    collections: root.library-collections;
+                    collections-title: root.library-title;
+                    status: root.status;
+                    tab-selected(index) => { root.library-tab-selected(index); }
+                    quick-action(id) => { root.quick-action(id); }
+                    song-activated(id) => { root.song-activated(id); }
+                    collection-activated(id, kind) => { root.shelf-item-clicked(id, kind); }
+                    create-playlist => { root.create-playlist(); }
+                }
+            }
+
+            if root.has-track : MiniPlayer {
+                song: root.now-playing;
+                playing: root.is-playing;
+                progress: root.progress;
+                toggle-play => { root.toggle-play(); }
+                next => { root.play-next(); }
+                open-player => { root.open-player(); }
+            }
+
+            TabBar {
+                current: root.current-tab;
+                selected(index) => { root.tab-selected(index); }
+            }
+        }
+
+        // ---- overlays ------------------------------------------------------
+        if root.player-open : PlayerScreen {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            song: root.now-playing;
+            playing: root.is-playing;
+            liked: root.now-playing.is-liked;
+            downloaded: root.now-playing.is-downloaded;
+            shuffle: root.shuffle;
+            repeat-mode: root.repeat-mode;
+            progress: root.progress;
+            position-label: root.position-label;
+            duration-label: root.duration-label;
+            lyrics: root.lyrics;
+            lyrics-source: root.lyrics-source;
+            lyrics-visible: root.lyrics-visible;
+            subtitle: root.status == "" ? "Echo Music" : root.status;
+            close => { root.close-player(); }
+            toggle-play => { root.toggle-play(); }
+            next => { root.play-next(); }
+            previous => { root.play-previous(); }
+            seek(value) => { root.seek(value); }
+            toggle-shuffle => { root.toggle-shuffle(); }
+            cycle-repeat => { root.cycle-repeat(); }
+            toggle-like => { root.toggle-like(); }
+            toggle-download => { root.toggle-download(); }
+            toggle-lyrics => { root.toggle-lyrics(); }
+            lyrics-source-clicked => { root.open-lyrics-source(); }
+        }
+
+        if root.settings-open : SettingsScreen {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            appearance: root.settings-appearance;
+            playback: root.settings-playback;
+            lyrics-rows: root.settings-lyrics;
+            extras: root.settings-extras;
+            eq-bands: root.eq-bands;
+            eq-enabled: root.eq-enabled;
+            provider-order: root.provider-order;
+            version: root.app-version;
+            close => { root.close-settings(); }
+            row-toggled(id, value) => { root.setting-toggled(id, value); }
+            row-activated(id) => { root.setting-activated(id); }
+            eq-toggled(value) => { root.eq-toggled(value); }
+            eq-band-changed(index, value) => { root.eq-band-changed(index, value); }
+            reset-eq => { root.reset-eq(); }
+        }
+    }
+}

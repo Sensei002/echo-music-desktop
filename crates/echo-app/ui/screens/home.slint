@@ -1,0 +1,114 @@
+// Echo Music Desktop — Home.
+//
+// Mirrors the upstream home feed: a greeting, the mood chip rail, then the
+// horizontally-scrolling shelves and the grouped "forgotten favourites" list.
+
+import { Theme } from "../theme.slint";
+import { Chip, GroupedCard, MediaTile, SectionHeader, ShelfData, SongData, SongRow } from "../components.slint";
+
+export component HomeScreen inherits Rectangle {
+    in property <string> greeting: "Good evening";
+    in property <[string]> chips: [];
+    in property <int> selected-chip: -1;
+    in property <[ShelfData]> shelves: [];
+    in property <[SongData]> favorites: [];
+    in property <string> favorites-title: "Forgotten favourites";
+    in property <bool> loading: false;
+    in property <string> status: "";
+
+    callback chip-selected(int);
+    callback shelf-item-clicked(string, string);
+    callback song-activated(string);
+    callback play-all(string, string);
+
+    background: Theme.background;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        vertical-scrollbar-policy: as-needed;
+        horizontal-scrollbar-policy: always-off;
+
+        VerticalLayout {
+            padding-left: Theme.page-padding;
+            padding-right: Theme.page-padding;
+            padding-bottom: 16px;
+            spacing: 18px;
+
+            Text {
+                text: root.greeting;
+                color: Theme.on-surface;
+                font-size: Theme.font-hero;
+                font-weight: 800;
+            }
+
+            // ---- mood / genre chips -------------------------------------
+            if root.chips.length > 0 : ScrollView {
+                height: 36px;
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: always-off;
+                HorizontalLayout {
+                    spacing: 8px;
+                    for chip[index] in root.chips : Chip {
+                        text: chip;
+                        selected: index == root.selected-chip;
+                        clicked => { root.chip-selected(index); }
+                    }
+                }
+            }
+
+            // ---- shelves ------------------------------------------------
+            for shelf[index] in root.shelves : VerticalLayout {
+                spacing: 10px;
+                SectionHeader {
+                    title: shelf.title;
+                    action: shelf.kind == "song" ? "Play all" : "Show all";
+                    action-clicked => { root.play-all(shelf.title, shelf.kind); }
+                }
+                ScrollView {
+                    height: 214px;
+                    horizontal-scrollbar-policy: always-off;
+                    vertical-scrollbar-policy: always-off;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        for item[item-index] in shelf.items : MediaTile {
+                            tile: item;
+                            activated => { root.shelf-item-clicked(item.id, item.kind); }
+                        }
+                    }
+                }
+            }
+
+            // ---- grouped favourites list --------------------------------
+            if root.favorites.length > 0 : VerticalLayout {
+                spacing: 10px;
+                SectionHeader {
+                    title: root.favorites-title;
+                    action: "Play all";
+                    action-clicked => { root.play-all(root.favorites-title, "song"); }
+                }
+                GroupedCard {
+                    content-height: root.favorites.length * 66px + 10px;
+                    for song[index] in root.favorites : SongRow {
+                        song: song;
+                        activated => { root.song-activated(song.id); }
+                    }
+                }
+            }
+
+            if root.loading : Text {
+                text: "Loading…";
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label;
+                horizontal-alignment: center;
+            }
+
+            if root.status != "" : Text {
+                text: root.status;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

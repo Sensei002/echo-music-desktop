@@ -1,0 +1,20 @@
+[package]
+name = "echo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Shared models, settings, persistence and theming for Echo Music Desktop."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+directories.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+log.workspace = true
+chrono.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true

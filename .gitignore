@@ -1,0 +1,28 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Slint generated code
+/crates/echo-app/ui/*.rs
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local app data / caches
+/.echocache
+*.log
+
+# Build output
+/dist
+/release
+
+# Local agent workspace data
+/.workbuddy-ai/

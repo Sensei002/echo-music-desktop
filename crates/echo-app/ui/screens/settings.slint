@@ -1,0 +1,354 @@
+// Echo Music Desktop — Settings.
+//
+// Grouped, iOS-style settings cards mirroring the upstream settings surface,
+// plus the 10-band equalizer with live sliders.
+
+import { Theme } from "../theme.slint";
+import { EqBandData, IconButton, SectionHeader, SettingRow } from "../components.slint";
+
+/// A compact on/off switch.
+component Toggle inherits Rectangle {
+    in property <bool> checked: false;
+    callback toggled(bool);
+
+    width: 46px;
+    height: 26px;
+    border-radius: 13px;
+    background: checked ? Theme.primary : Theme.surface-variant;
+    animate background { duration: 160ms; }
+
+    Rectangle {
+        x: root.checked ? root.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        background: root.checked ? Theme.on-primary : Theme.on-surface-variant;
+        animate x { duration: 160ms; }
+    }
+
+    TouchArea {
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+/// One settings line: label + description, then either a toggle, a value, or a
+/// chevron.
+component SettingLine inherits Rectangle {
+    in property <SettingRow> row;
+    callback toggled(bool);
+    callback activated();
+
+    height: 60px;
+    border-radius: Theme.radius-tile;
+    background: line-touch.has-hover ? Theme.chip : transparent;
+    animate background { duration: 120ms; }
+
+    line-touch := TouchArea {
+        clicked => { root.activated(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.row.label;
+                color: Theme.on-surface;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.row.description;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-micro;
+                overflow: elide;
+                visible: root.row.description != "";
+            }
+        }
+
+        Toggle {
+            checked: root.row.toggle;
+            visible: root.row.kind == "toggle";
+            vertical-alignment: center;
+            toggled(value) => { root.toggled(value); }
+        }
+
+        Text {
+            text: root.row.value;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            vertical-alignment: center;
+            visible: root.row.kind == "value";
+        }
+
+        Text {
+            text: "›";
+            color: Theme.on-surface-variant;
+            font-size: 18px;
+            vertical-alignment: center;
+            visible: root.row.kind == "nav";
+        }
+    }
+}
+
+/// One equalizer band with a vertical-ish slider.
+component EqBand inherits Rectangle {
+    in property <EqBandData> band;
+    callback changed(float);
+
+    width: 56px;
+    height: 150px;
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 6px;
+        Text {
+            text: root.band.label;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-micro;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            width: 8px;
+            horizontal-alignment: center;
+            border-radius: 4px;
+            background: Theme.surface-variant;
+
+            // The filled part grows from the centre (0 dB) upwards or downwards.
+            Rectangle {
+                width: parent.width;
+                border-radius: 4px;
+                background: Theme.primary;
+                y: root.band.gain >= 0
+                    ? parent.height / 2 - (parent.height / 2) * clamp(root.band.gain / 12.0, 0.0, 1.0)
+                    : parent.height / 2;
+                height: (parent.height / 2) * abs(clamp(root.band.gain / 12.0, -1.0, 1.0));
+            }
+
+            Rectangle {
+                x: -6px;
+                width: 20px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.on-surface;
+                y: parent.height / 2 - (parent.height / 2) * clamp(root.band.gain / 12.0, -1.0, 1.0) - 3px;
+            }
+
+            TouchArea {
+                moved => { root.changed(clamp(12.0 - (self.mouse-y / self.height) * 24.0, -12.0, 12.0)); }
+                clicked => { root.changed(clamp(12.0 - (self.mouse-y / self.height) * 24.0, -12.0, 12.0)); }
+            }
+        }
+
+        Text {
+            text: "\(round(root.band.gain))";
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-micro;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component SettingsScreen inherits Rectangle {
+    in property <[SettingRow]> appearance: [];
+    in property <[SettingRow]> playback: [];
+    in property <[SettingRow]> lyrics-rows: [];
+    in property <[SettingRow]> extras: [];
+    in property <[EqBandData]> eq-bands: [];
+    in property <bool> eq-enabled: false;
+    in property <string> provider-order: "";
+    in property <string> version: "";
+
+    callback close();
+    callback row-toggled(string, bool);
+    callback row-activated(string);
+    callback eq-toggled(bool);
+    callback eq-band-changed(int, float);
+    callback reset-eq();
+
+    background: Theme.background;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            padding-left: Theme.page-padding;
+            padding-right: Theme.page-padding;
+            padding-top: 10px;
+            spacing: 10px;
+            IconButton {
+                glyph: "‹";
+                size: 36px;
+                font-size: 20px;
+                vertical-alignment: center;
+                clicked => { root.close(); }
+            }
+            Text {
+                text: "Settings";
+                color: Theme.on-surface;
+                font-size: Theme.font-display;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+
+        ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            horizontal-scrollbar-policy: always-off;
+
+            VerticalLayout {
+                padding-left: Theme.page-padding;
+                padding-right: Theme.page-padding;
+                padding-bottom: 24px;
+                spacing: 20px;
+
+                // ---- appearance ------------------------------------------
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader { title: "Appearance"; }
+                    Rectangle {
+                        border-radius: Theme.radius-card;
+                        background: Theme.card;
+                        height: root.appearance.length * 62px + 10px;
+                        VerticalLayout {
+                            padding: 6px;
+                            spacing: 2px;
+                            for row[index] in root.appearance : SettingLine {
+                                row: row;
+                                toggled(value) => { root.row-toggled(row.id, value); }
+                                activated => { root.row-activated(row.id); }
+                            }
+                        }
+                    }
+                }
+
+                // ---- playback --------------------------------------------
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader { title: "Playback"; }
+                    Rectangle {
+                        border-radius: Theme.radius-card;
+                        background: Theme.card;
+                        height: root.playback.length * 62px + 10px;
+                        VerticalLayout {
+                            padding: 6px;
+                            spacing: 2px;
+                            for row[index] in root.playback : SettingLine {
+                                row: row;
+                                toggled(value) => { root.row-toggled(row.id, value); }
+                                activated => { root.row-activated(row.id); }
+                            }
+                        }
+                    }
+                }
+
+                // ---- equalizer -------------------------------------------
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader {
+                        title: "Equalizer";
+                        action: root.eq-enabled ? "Reset" : "";
+                        action-clicked => { root.reset-eq(); }
+                    }
+                    Rectangle {
+                        border-radius: Theme.radius-card;
+                        background: Theme.card;
+                        height: 230px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "Enable equalizer";
+                                    color: Theme.on-surface;
+                                    font-size: Theme.font-body;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Toggle {
+                                    checked: root.eq-enabled;
+                                    vertical-alignment: center;
+                                    toggled(value) => { root.eq-toggled(value); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 2px;
+                                for band[index] in root.eq-bands : EqBand {
+                                    band: band;
+                                    horizontal-stretch: 1;
+                                    changed(value) => { root.eq-band-changed(index, value); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---- lyrics ----------------------------------------------
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader { title: "Lyrics"; }
+                    Rectangle {
+                        border-radius: Theme.radius-card;
+                        background: Theme.card;
+                        height: root.lyrics-rows.length * 62px + 10px;
+                        VerticalLayout {
+                            padding: 6px;
+                            spacing: 2px;
+                            for row[index] in root.lyrics-rows : SettingLine {
+                                row: row;
+                                toggled(value) => { root.row-toggled(row.id, value); }
+                                activated => { root.row-activated(row.id); }
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.provider-order;
+                        color: Theme.on-surface-variant;
+                        font-size: Theme.font-micro;
+                        wrap: word-wrap;
+                    }
+                }
+
+                // ---- extras ------------------------------------------------
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader { title: "Integrations & extras"; }
+                    Rectangle {
+                        border-radius: Theme.radius-card;
+                        background: Theme.card;
+                        height: root.extras.length * 62px + 10px;
+                        VerticalLayout {
+                            padding: 6px;
+                            spacing: 2px;
+                            for row[index] in root.extras : SettingLine {
+                                row: row;
+                                toggled(value) => { root.row-toggled(row.id, value); }
+                                activated => { root.row-activated(row.id); }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Echo Music Desktop " + root.version;
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-micro;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}

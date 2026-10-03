@@ -1,0 +1,585 @@
+// Echo Music Desktop — reusable components.
+//
+// Icons are Unicode glyphs rather than a bundled icon font: it keeps the binary
+// small, works on every platform without asset shipping, and matches the clean
+// typography-driven "Nothing OS" aesthetic the upstream design targets.
+
+import { Theme } from "theme.slint";
+
+// ---------------------------------------------------------------------------
+// Data shapes shared with Rust
+// ---------------------------------------------------------------------------
+
+export struct SongData {
+    id: string,
+    title: string,
+    subtitle: string,
+    duration: string,
+    cover: image,
+    is-video: bool,
+    is-liked: bool,
+    is-downloaded: bool,
+}
+
+export struct TileData {
+    id: string,
+    title: string,
+    subtitle: string,
+    cover: image,
+    kind: string,
+}
+
+export struct ShelfData {
+    title: string,
+    subtitle: string,
+    kind: string,
+    items: [TileData],
+}
+
+export struct LyricLineData {
+    text: string,
+    translation: string,
+    start-ms: int,
+    is-active: bool,
+}
+
+export struct EqBandData {
+    label: string,
+    gain: float,
+}
+
+export struct QuickAction {
+    id: string,
+    glyph: string,
+    label: string,
+    count: string,
+}
+
+export struct SettingRow {
+    id: string,
+    label: string,
+    description: string,
+    kind: string,
+    value: string,
+    toggle: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Primitives
+// ---------------------------------------------------------------------------
+
+/// The Echo flower logo.
+export component Logo inherits Image {
+    source: @image-url("assets/logo.png");
+    width: 28px;
+    height: 28px;
+    image-fit: contain;
+}
+
+/// A circular, glyph-based icon button.
+export component IconButton inherits Rectangle {
+    in property <string> glyph: "•";
+    in property <length> size: 36px;
+    in property <length> font-size: 16px;
+    in property <color> tint: Theme.on-surface;
+    in property <brush> background-off: transparent;
+    in property <brush> background-on: Theme.chip;
+    callback clicked();
+
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: touch.has-hover ? background-on : background-off;
+    animate background { duration: 140ms; }
+
+    Text {
+        text: root.glyph;
+        color: root.tint;
+        font-size: root.font-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// A filled pill button (e.g. "Play all").
+export component PillButton inherits Rectangle {
+    in property <string> text: "Button";
+    in property <color> background: transparent;
+    in property <color> foreground: Theme.on-surface;
+    in property <length> padding-x: 14px;
+    in property <length> padding-y: 6px;
+    callback clicked();
+
+    height: label.preferred-height + padding-y * 2;
+    width: label.preferred-width + padding-x * 2;
+    border-radius: Theme.radius-pill;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+    background: touch.has-hover ? Theme.chip : background;
+    animate background { duration: 140ms; }
+
+    label := Text {
+        text: root.text;
+        color: root.foreground;
+        font-size: Theme.font-label;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// A selectable filter chip.
+export component Chip inherits Rectangle {
+    in property <string> text: "Chip";
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 34px;
+    width: label.preferred-width + 28px;
+    border-radius: Theme.radius-pill;
+    background: selected ? Theme.primary : (touch.has-hover ? Theme.chip : Theme.chip);
+    animate background { duration: 160ms; }
+
+    label := Text {
+        text: root.text;
+        color: root.selected ? Theme.on-primary : Theme.on-surface-variant;
+        font-size: Theme.font-label;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Rounded album artwork with a graceful placeholder.
+export component CoverArt inherits Rectangle {
+    in property <image> source;
+    in property <length> radius: Theme.radius-tile;
+    in property <bool> circular: false;
+
+    border-radius: circular ? min(width, height) / 2 : radius;
+    clip: true;
+    background: Theme.surface-container-high;
+
+    Image {
+        source: root.source;
+        width: 100%;
+        height: 100%;
+        image-fit: cover;
+        visible: root.source.width > 0;
+    }
+
+    // Placeholder glyph while artwork loads (or when there is none).
+    Text {
+        text: "♪";
+        color: Theme.on-surface-variant;
+        font-size: min(root.width, root.height) * 0.4;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+        visible: root.source.width <= 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Composite rows and tiles
+// ---------------------------------------------------------------------------
+
+/// A section heading with an optional trailing action.
+export component SectionHeader inherits HorizontalLayout {
+    in property <string> title: "";
+    in property <string> action: "";
+    in property <length> font-size: Theme.font-title;
+    callback action-clicked();
+
+    alignment: start;
+    spacing: 8px;
+
+    Text {
+        text: root.title;
+        color: Theme.on-surface;
+        font-size: root.font-size;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+
+    PillButton {
+        text: root.action;
+        visible: root.action != "";
+        vertical-alignment: center;
+        clicked => { root.action-clicked(); }
+    }
+}
+
+/// One track row: artwork, title, subtitle, duration, overflow.
+export component SongRow inherits Rectangle {
+    in property <SongData> song;
+    in property <bool> show-index: false;
+    in property <int> index: 0;
+    in property <bool> is-current: false;
+    callback activated();
+    callback more-clicked();
+
+    height: 64px;
+    border-radius: Theme.radius-tile;
+    background: touch.has-hover ? Theme.chip : transparent;
+    animate background { duration: 140ms; }
+
+    // Declared before the content so the child controls stay on top of it.
+    touch := TouchArea {
+        clicked => { root.activated(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 12px;
+
+        Text {
+            text: (root.index + 1);
+            color: root.is-current ? Theme.primary : Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            vertical-alignment: center;
+            width: 22px;
+            horizontal-alignment: right;
+            visible: root.show-index;
+        }
+
+        CoverArt {
+            source: root.song.cover;
+            width: 46px;
+            height: 46px;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.song.title;
+                color: root.is-current ? Theme.primary : Theme.on-surface;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.song.subtitle;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.song.duration;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+
+        IconButton {
+            glyph: "⋮";
+            size: 32px;
+            font-size: 18px;
+            vertical-alignment: center;
+            clicked => { root.more-clicked(); }
+        }
+    }
+}
+
+/// A square artwork tile used by carousels and grids.
+export component MediaTile inherits Rectangle {
+    in property <TileData> tile;
+    in property <length> tile-width: 150px;
+    callback activated();
+
+    width: tile-width;
+    height: tile-width + 52px;
+    background: transparent;
+
+    touch := TouchArea {
+        clicked => { root.activated(); }
+    }
+
+    VerticalLayout {
+        spacing: 8px;
+
+        CoverArt {
+            source: root.tile.cover;
+            circular: root.tile.kind == "artist";
+            width: 100%;
+            height: root.tile-width;
+        }
+
+        Text {
+            text: root.tile.title;
+            color: Theme.on-surface;
+            font-size: Theme.font-body;
+            font-weight: 600;
+            overflow: elide;
+            height: 20px;
+        }
+        Text {
+            text: root.tile.subtitle;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label;
+            overflow: elide;
+            height: 16px;
+        }
+    }
+}
+
+/// A grouped card that holds a list of rows (iOS-Settings style).
+export component GroupedCard inherits Rectangle {
+    in property <length> content-height: 0px;
+    in property <length> inner-padding: 6px;
+
+    border-radius: Theme.radius-card;
+    background: Theme.card;
+    height: content-height;
+
+    VerticalLayout {
+        padding: inner-padding;
+        spacing: 2px;
+        @children
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chrome
+// ---------------------------------------------------------------------------
+
+/// The screen title row with the Echo logo and global actions.
+export component TopBar inherits Rectangle {
+    in property <string> title: "Echo Music";
+    callback search-clicked();
+    callback history-clicked();
+    callback account-clicked();
+    callback settings-clicked();
+
+    height: 56px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: Theme.page-padding;
+        padding-right: Theme.page-padding;
+        spacing: 10px;
+
+        Logo {
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.title;
+            color: Theme.on-surface;
+            font-size: Theme.font-display;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        IconButton {
+            glyph: "⌕";
+            size: 34px;
+            vertical-alignment: center;
+            clicked => { root.search-clicked(); }
+        }
+        IconButton {
+            glyph: "⏱";
+            size: 34px;
+            vertical-alignment: center;
+            clicked => { root.history-clicked(); }
+        }
+        IconButton {
+            glyph: "⚙";
+            size: 34px;
+            vertical-alignment: center;
+            clicked => { root.settings-clicked(); }
+        }
+    }
+}
+
+/// The floating bottom navigation bar.
+export component TabBar inherits Rectangle {
+    in property <int> current: 0;
+    callback selected(int);
+
+    height: 64px;
+    background: transparent;
+
+    Rectangle {
+        x: 16px;
+        width: parent.width - 32px;
+        height: 54px;
+        y: 5px;
+        border-radius: Theme.radius-pill;
+        background: Theme.glass-strong;
+        border-width: 1px;
+        border-color: Theme.outline-variant;
+
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+
+            TabButton {
+                glyph: "⌂";
+                label: "Home";
+                active: root.current == 0;
+                clicked => { root.selected(0); }
+            }
+            TabButton {
+                glyph: "⌕";
+                label: "Search";
+                active: root.current == 1;
+                clicked => { root.selected(1); }
+            }
+            TabButton {
+                glyph: "≡";
+                label: "Library";
+                active: root.current == 2;
+                clicked => { root.selected(2); }
+            }
+        }
+    }
+}
+
+component TabButton inherits Rectangle {
+    in property <string> glyph: "•";
+    in property <string> label: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: parent.height;
+    border-radius: Theme.radius-pill;
+    background: active ? Theme.chip : transparent;
+    animate background { duration: 160ms; }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 1px;
+        Text {
+            text: root.glyph;
+            color: root.active ? Theme.primary : Theme.on-surface-variant;
+            font-size: 17px;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.primary : Theme.on-surface-variant;
+            font-size: Theme.font-micro;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// The persistent mini player docked above the tab bar.
+export component MiniPlayer inherits Rectangle {
+    in property <SongData> song;
+    in property <bool> playing: false;
+    in property <float> progress: 0.0;
+    callback toggle-play();
+    callback open-player();
+    callback next();
+
+    height: 62px;
+    border-radius: Theme.radius-card;
+    background: Theme.card;
+    clip: true;
+
+    // Slim progress line along the top edge.
+    Rectangle {
+        height: 2px;
+        width: parent.width * clamp(root.progress, 0.0, 1.0);
+        background: Theme.primary;
+        x: 0;
+        y: 0;
+    }
+
+    // Tapping the artwork/title area expands the full player. Declared before
+    // the controls so the transport buttons stay clickable.
+    TouchArea {
+        x: 0;
+        y: 0;
+        width: parent.width - 100px;
+        height: parent.height;
+        clicked => { root.open-player(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+
+        CoverArt {
+            source: root.song.cover;
+            width: 44px;
+            height: 44px;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.song.title;
+                color: Theme.on-surface;
+                font-size: Theme.font-body;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: root.song.subtitle;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-micro;
+                overflow: elide;
+            }
+        }
+
+        IconButton {
+            glyph: root.playing ? "⏸" : "▶";
+            size: 38px;
+            font-size: 15px;
+            vertical-alignment: center;
+            background-on: Theme.primary-container;
+            clicked => { root.toggle-play(); }
+        }
+        IconButton {
+            glyph: "⏭";
+            size: 34px;
+            font-size: 15px;
+            vertical-alignment: center;
+            clicked => { root.next(); }
+        }
+    }
+}

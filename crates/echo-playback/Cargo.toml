@@ -1,0 +1,19 @@
+[package]
+name = "echo-playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Audio engine, queue and equalizer for Echo Music Desktop."
+
+[dependencies]
+echo-core.workspace = true
+
+rodio.workspace = true
+reqwest.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+log.workspace = true
+rand.workspace = true
+parking_lot.workspace = true
