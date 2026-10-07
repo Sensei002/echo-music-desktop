@@ -3,6 +3,11 @@
 **/*.rs.bk
 *.pdb
 
+# Cargo.lock is committed on purpose. This is a workspace whose default member
+# is a binary (`echo-app`), so the lockfile is what makes CI and release builds
+# reproducible. Do NOT add it here.
+!Cargo.lock
+
 # Slint generated code
 /crates/echo-app/ui/*.rs
 

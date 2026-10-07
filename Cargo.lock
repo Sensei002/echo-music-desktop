@@ -1,0 +1,20 @@
+#
+# PLACEHOLDER — regenerate with a single command, then commit.
+#
+# This file is intentionally a marker, not a valid lockfile.
+#
+# Regenerate the real lockfile on any machine with a stable Rust toolchain:
+#
+#     cargo generate-lockfile
+#
+# Then commit the result:
+#
+#     git add Cargo.lock && git commit -m "chore: commit Cargo.lock for reproducible CI"
+#
+# Why this matters: without a committed Cargo.lock, every CI job resolves the
+# dependency graph from scratch against the current crates.io index. The
+# workspace uses wide caret requirements (rodio 0.20, rusqlite 0.32, image 0.25,
+# rand 0.8, lru 0.12, slint 1.8), so a newly-published semver-compatible
+# release can change the build - and break it - without any change to this repo.
+# Committing the lockfile makes local, CI and release builds resolve the exact
+# same versions.

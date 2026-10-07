@@ -13,5 +13,7 @@
 *.gz binary
 *.tar binary
 
-# Lockfiles are generated; keep them out of diffs.
-Cargo.lock linguist-generated=true
+# Cargo.lock is committed and is not generated noise - it is the input that
+# pins every build. Keep it visible in diffs (no linguist-generated) and do not
+# let the text=auto eol=lf rule rewrite it.
+Cargo.lock -text
