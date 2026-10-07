@@ -227,6 +227,24 @@ The upstream aesthetic is deliberately *not* stock Material 3:
 
 Everything else — streaming, search, browsing, playback, the equalizer, lyrics, downloads, Discord Rich Presence and the library — is functional.
 
+### Upgrading from ≤ 1.4.0: worth clearing the artwork cache
+
+Cover art is cached on disk under
+`%APPDATA%\echomusic\Echo Music Desktop\data\artwork`. Older builds wrote every
+download as `<hash>.img` regardless of what the server actually returned, and
+Slint resolves a decode format **from the file extension** — so each of those
+files was silently rejected and no cover art rendered:
+
+```
+Error loading image from ...\artwork\<hash>.img:
+The file extension `."img"` was not recognized as an image format
+```
+
+Newer builds sniff the magic bytes (JPEG / PNG / WebP / GIF / BMP) and store the
+file under its real extension. The old `.img` entries are unreachable by the new
+lookup, so they linger as dead weight — **Settings → Clear cache**, or delete the
+directory, to reclaim the space.
+
 ---
 
 ## Legal

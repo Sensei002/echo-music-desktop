@@ -1192,7 +1192,11 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
             let dir = state.borrow().paths.artwork_cache_dir();
             let mut s = state.borrow_mut();
             for url in urls {
-                let path = crate::covers::cache_path(&dir, &url);
+                // The cache file's extension depends on the format the server
+                // returned, so resolve it rather than assuming one.
+                let Some(path) = crate::covers::find_cached(&dir, &url) else {
+                    continue;
+                };
                 if let Ok(image) = slint::Image::load_from_path(&path) {
                     s.pending_covers.remove(&url);
                     s.covers.insert(url, image);
