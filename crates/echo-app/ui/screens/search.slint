@@ -5,6 +5,7 @@
 // them.
 
 import { Theme } from "../theme.slint";
+import { ScrollView } from "std-widgets.slint";
 import { GroupedCard, MediaTile, SectionHeader, SongData, SongRow, TileData } from "../components.slint";
 
 export component SearchScreen inherits Rectangle {
@@ -51,15 +52,24 @@ export component SearchScreen inherits Rectangle {
                 }
 
                 field := TextInput {
-                    placeholder-text: "Search YouTube Music…";
                     single-line: true;
                     text: root.query;
                     color: Theme.on-surface;
                     font-size: Theme.font-body;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
-                    edited(text) => { root.query-edited(text); }
+                    edited => { root.query-edited(field.text); }
                     accepted => { root.submit(field.text); }
+                }
+
+                // Slint's TextInput has no placeholder property, so the hint is
+                // a non-interactive overlay shown while the field is empty.
+                Text {
+                    text: "Search YouTube Music…";
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    visible: root.query == "";
                 }
 
                 Text {

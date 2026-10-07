@@ -11,7 +11,7 @@ pub mod paths;
 pub mod theme;
 pub mod util;
 
-pub use config::{AudioQuality, LibraryLayout, Settings, ThemeMode};
+pub use config::{AudioQuality, LibraryLayout, Settings, ThemeMode, DEFAULT_DISCORD_CLIENT_ID};
 pub use db::Library;
 pub use models::*;
 pub use paths::AppPaths;

@@ -4,6 +4,7 @@
 // plus the 10-band equalizer with live sliders.
 
 import { Theme } from "../theme.slint";
+import { ScrollView } from "std-widgets.slint";
 import { EqBandData, IconButton, SectionHeader, SettingRow } from "../components.slint";
 
 /// A compact on/off switch.
@@ -35,7 +36,8 @@ component Toggle inherits Rectangle {
 /// One settings line: label + description, then either a toggle, a value, or a
 /// chevron.
 component SettingLine inherits Rectangle {
-    in property <SettingRow> row;
+    // Named `data` because `row` is reserved by Slint (a layout property).
+    in property <SettingRow> data;
     callback toggled(bool);
     callback activated();
 
@@ -58,34 +60,33 @@ component SettingLine inherits Rectangle {
             horizontal-stretch: 1;
             spacing: 2px;
             Text {
-                text: root.row.label;
+                text: root.data.label;
                 color: Theme.on-surface;
                 font-size: Theme.font-body;
                 font-weight: 600;
                 overflow: elide;
             }
             Text {
-                text: root.row.description;
+                text: root.data.description;
                 color: Theme.on-surface-variant;
                 font-size: Theme.font-micro;
                 overflow: elide;
-                visible: root.row.description != "";
+                visible: root.data.description != "";
             }
         }
 
         Toggle {
-            checked: root.row.toggle;
-            visible: root.row.kind == "toggle";
-            vertical-alignment: center;
+            checked: root.data.toggle;
+            visible: root.data.kind == "toggle";
             toggled(value) => { root.toggled(value); }
         }
 
         Text {
-            text: root.row.value;
+            text: root.data.value;
             color: Theme.on-surface-variant;
             font-size: Theme.font-label;
             vertical-alignment: center;
-            visible: root.row.kind == "value";
+            visible: root.data.kind == "value";
         }
 
         Text {
@@ -93,7 +94,7 @@ component SettingLine inherits Rectangle {
             color: Theme.on-surface-variant;
             font-size: 18px;
             vertical-alignment: center;
-            visible: root.row.kind == "nav";
+            visible: root.data.kind == "nav";
         }
     }
 }
@@ -119,7 +120,6 @@ component EqBand inherits Rectangle {
         Rectangle {
             vertical-stretch: 1;
             width: 8px;
-            horizontal-alignment: center;
             border-radius: 4px;
             background: Theme.surface-variant;
 
@@ -150,7 +150,7 @@ component EqBand inherits Rectangle {
         }
 
         Text {
-            text: "\(round(root.band.gain))";
+            text: "\{round(root.band.gain)}";
             color: Theme.on-surface-variant;
             font-size: Theme.font-micro;
             horizontal-alignment: center;
@@ -189,7 +189,6 @@ export component SettingsScreen inherits Rectangle {
                 glyph: "‹";
                 size: 36px;
                 font-size: 20px;
-                vertical-alignment: center;
                 clicked => { root.close(); }
             }
             Text {
@@ -225,7 +224,7 @@ export component SettingsScreen inherits Rectangle {
                             padding: 6px;
                             spacing: 2px;
                             for row[index] in root.appearance : SettingLine {
-                                row: row;
+                                data: row;
                                 toggled(value) => { root.row-toggled(row.id, value); }
                                 activated => { root.row-activated(row.id); }
                             }
@@ -245,7 +244,7 @@ export component SettingsScreen inherits Rectangle {
                             padding: 6px;
                             spacing: 2px;
                             for row[index] in root.playback : SettingLine {
-                                row: row;
+                                data: row;
                                 toggled(value) => { root.row-toggled(row.id, value); }
                                 activated => { root.row-activated(row.id); }
                             }
@@ -280,7 +279,6 @@ export component SettingsScreen inherits Rectangle {
                                 }
                                 Toggle {
                                     checked: root.eq-enabled;
-                                    vertical-alignment: center;
                                     toggled(value) => { root.eq-toggled(value); }
                                 }
                             }
@@ -308,7 +306,7 @@ export component SettingsScreen inherits Rectangle {
                             padding: 6px;
                             spacing: 2px;
                             for row[index] in root.lyrics-rows : SettingLine {
-                                row: row;
+                                data: row;
                                 toggled(value) => { root.row-toggled(row.id, value); }
                                 activated => { root.row-activated(row.id); }
                             }
@@ -334,7 +332,7 @@ export component SettingsScreen inherits Rectangle {
                             padding: 6px;
                             spacing: 2px;
                             for row[index] in root.extras : SettingLine {
-                                row: row;
+                                data: row;
                                 toggled(value) => { root.row-toggled(row.id, value); }
                                 activated => { root.row-activated(row.id); }
                             }

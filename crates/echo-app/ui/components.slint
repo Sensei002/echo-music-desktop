@@ -97,7 +97,6 @@ export component IconButton inherits Rectangle {
         color: root.tint;
         font-size: root.font-size;
         horizontal-alignment: center;
-        vertical-alignment: center;
         width: parent.width;
         height: parent.height;
     }
@@ -110,7 +109,10 @@ export component IconButton inherits Rectangle {
 /// A filled pill button (e.g. "Play all").
 export component PillButton inherits Rectangle {
     in property <string> text: "Button";
-    in property <color> background: transparent;
+    // Named `background-off` because `background` is inherited from Rectangle
+    // and Slint forbids redeclaring it (matches IconButton's convention).
+    in property <color> background-off: transparent;
+    in property <color> background-on: Theme.chip;
     in property <color> foreground: Theme.on-surface;
     in property <length> padding-x: 14px;
     in property <length> padding-y: 6px;
@@ -121,7 +123,7 @@ export component PillButton inherits Rectangle {
     border-radius: Theme.radius-pill;
     border-width: 1px;
     border-color: Theme.outline-variant;
-    background: touch.has-hover ? Theme.chip : background;
+    background: touch.has-hover ? background-on : background-off;
     animate background { duration: 140ms; }
 
     label := Text {
@@ -130,7 +132,6 @@ export component PillButton inherits Rectangle {
         font-size: Theme.font-label;
         font-weight: 600;
         horizontal-alignment: center;
-        vertical-alignment: center;
         width: parent.width;
         height: parent.height;
     }
@@ -158,7 +159,6 @@ export component Chip inherits Rectangle {
         font-size: Theme.font-label;
         font-weight: 600;
         horizontal-alignment: center;
-        vertical-alignment: center;
         width: parent.width;
         height: parent.height;
     }
@@ -174,7 +174,7 @@ export component CoverArt inherits Rectangle {
     in property <length> radius: Theme.radius-tile;
     in property <bool> circular: false;
 
-    border-radius: circular ? min(width, height) / 2 : radius;
+    border-radius: circular ? min(self.width, self.height) / 2 : radius;
     clip: true;
     background: Theme.surface-container-high;
 
@@ -192,7 +192,6 @@ export component CoverArt inherits Rectangle {
         color: Theme.on-surface-variant;
         font-size: min(root.width, root.height) * 0.4;
         horizontal-alignment: center;
-        vertical-alignment: center;
         width: parent.width;
         height: parent.height;
         visible: root.source.width <= 0;
@@ -218,14 +217,12 @@ export component SectionHeader inherits HorizontalLayout {
         color: Theme.on-surface;
         font-size: root.font-size;
         font-weight: 700;
-        vertical-alignment: center;
         horizontal-stretch: 1;
     }
 
     PillButton {
         text: root.action;
         visible: root.action != "";
-        vertical-alignment: center;
         clicked => { root.action-clicked(); }
     }
 }
@@ -258,7 +255,6 @@ export component SongRow inherits Rectangle {
             text: (root.index + 1);
             color: root.is-current ? Theme.primary : Theme.on-surface-variant;
             font-size: Theme.font-label;
-            vertical-alignment: center;
             width: 22px;
             horizontal-alignment: right;
             visible: root.show-index;
@@ -268,7 +264,6 @@ export component SongRow inherits Rectangle {
             source: root.song.cover;
             width: 46px;
             height: 46px;
-            vertical-alignment: center;
         }
 
         VerticalLayout {
@@ -297,7 +292,6 @@ export component SongRow inherits Rectangle {
             text: root.song.duration;
             color: Theme.on-surface-variant;
             font-size: Theme.font-label;
-            vertical-alignment: center;
             horizontal-alignment: right;
         }
 
@@ -305,7 +299,6 @@ export component SongRow inherits Rectangle {
             glyph: "⋮";
             size: 32px;
             font-size: 18px;
-            vertical-alignment: center;
             clicked => { root.more-clicked(); }
         }
     }
@@ -390,7 +383,6 @@ export component TopBar inherits Rectangle {
         spacing: 10px;
 
         Logo {
-            vertical-alignment: center;
         }
 
         Text {
@@ -398,28 +390,62 @@ export component TopBar inherits Rectangle {
             color: Theme.on-surface;
             font-size: Theme.font-display;
             font-weight: 700;
-            vertical-alignment: center;
             horizontal-stretch: 1;
         }
 
         IconButton {
             glyph: "⌕";
             size: 34px;
-            vertical-alignment: center;
             clicked => { root.search-clicked(); }
         }
         IconButton {
             glyph: "⏱";
             size: 34px;
-            vertical-alignment: center;
             clicked => { root.history-clicked(); }
         }
         IconButton {
             glyph: "⚙";
             size: 34px;
-            vertical-alignment: center;
             clicked => { root.settings-clicked(); }
         }
+    }
+}
+
+component TabButton inherits Rectangle {
+    in property <string> glyph: "•";
+    in property <string> label: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    // `parent` is unresolvable now that this component is declared at file
+    // scope rather than nested in TabBar, so stretch to fill the layout cell.
+    height: 100%;
+    border-radius: Theme.radius-pill;
+    background: active ? Theme.chip : transparent;
+    animate background { duration: 160ms; }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 1px;
+        Text {
+            text: root.glyph;
+            color: root.active ? Theme.primary : Theme.on-surface-variant;
+            font-size: 17px;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.primary : Theme.on-surface-variant;
+            font-size: Theme.font-micro;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
     }
 }
 
@@ -467,41 +493,6 @@ export component TabBar inherits Rectangle {
     }
 }
 
-component TabButton inherits Rectangle {
-    in property <string> glyph: "•";
-    in property <string> label: "";
-    in property <bool> active: false;
-    callback clicked();
-
-    horizontal-stretch: 1;
-    height: parent.height;
-    border-radius: Theme.radius-pill;
-    background: active ? Theme.chip : transparent;
-    animate background { duration: 160ms; }
-
-    VerticalLayout {
-        alignment: center;
-        spacing: 1px;
-        Text {
-            text: root.glyph;
-            color: root.active ? Theme.primary : Theme.on-surface-variant;
-            font-size: 17px;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: root.label;
-            color: root.active ? Theme.primary : Theme.on-surface-variant;
-            font-size: Theme.font-micro;
-            font-weight: 600;
-            horizontal-alignment: center;
-        }
-    }
-
-    TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
-
 /// The persistent mini player docked above the tab bar.
 export component MiniPlayer inherits Rectangle {
     in property <SongData> song;
@@ -544,7 +535,6 @@ export component MiniPlayer inherits Rectangle {
             source: root.song.cover;
             width: 44px;
             height: 44px;
-            vertical-alignment: center;
         }
 
         VerticalLayout {
@@ -570,7 +560,6 @@ export component MiniPlayer inherits Rectangle {
             glyph: root.playing ? "⏸" : "▶";
             size: 38px;
             font-size: 15px;
-            vertical-alignment: center;
             background-on: Theme.primary-container;
             clicked => { root.toggle-play(); }
         }
@@ -578,7 +567,6 @@ export component MiniPlayer inherits Rectangle {
             glyph: "⏭";
             size: 34px;
             font-size: 15px;
-            vertical-alignment: center;
             clicked => { root.next(); }
         }
     }

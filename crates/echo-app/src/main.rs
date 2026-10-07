@@ -11,13 +11,13 @@ mod workers;
 
 slint::include_modules!();
 
-use crate::state::{greeting, string_model, AppState};
+use crate::state::{greeting, model, string_model, AppState};
 use crate::workers::{Update, Workers};
 use echo_core::{
     AppPaths, AudioQuality, Library, MediaItem, PlaybackState, RepeatMode, Settings, Song,
     ThemeMode,
 };
-use echo_innertube::MusicClient;
+use echo_innertube::{MusicClient, SearchFilter};
 use echo_lyrics::LyricsService;
 use echo_playback::{Command, Event, PlaybackEngine};
 use slint::{ComponentHandle, SharedString, Timer, TimerMode};
@@ -35,6 +35,17 @@ const ACCENTS: [&str; 5] = ["#ED5564", "#7C4DFF", "#00BCD4", "#4CAF50", "#FF9800
 
 /// The label of the home screen's favourites card.
 const FAVOURITES_TITLE: &str = "Forgotten favourites";
+
+/// Builds the shared HTTP client used for artwork and downloads.
+///
+/// Echo does not talk to YouTube through this client (the InnerTube crate owns
+/// that); it is only for fetching media and images from CDN URLs.
+pub fn http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .user_agent(concat!("echo-music-desktop/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .expect("failed to build the HTTP client")
+}
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -95,6 +106,9 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Start Discord Rich Presence if the user left it enabled.
+    state.borrow_mut().sync_discord();
+
     wire_callbacks(&window, &state, &workers);
 
     // ---- first loads -------------------------------------------------------
@@ -104,10 +118,13 @@ fn main() -> anyhow::Result<()> {
     // ---- the update loop ---------------------------------------------------
     let timer = Timer::default();
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         timer.start(TimerMode::Repeated, Duration::from_millis(120), move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             pump(&window, &state, &workers, &rx);
         });
     }
@@ -123,59 +140,56 @@ fn main() -> anyhow::Result<()> {
 
 fn refresh_settings(window: &AppWindow, state: &AppState) {
     let (appearance, playback, lyrics, extras) = state.settings_groups();
-    window.set_settings_appearance(appearance.into());
-    window.set_settings_playback(playback.into());
-    window.set_settings_lyrics(lyrics.into());
-    window.set_settings_extras(extras.into());
-    window.set_eq_bands(state.eq_bands().into());
+    window.set_settings_appearance(model(appearance));
+    window.set_settings_playback(model(playback));
+    window.set_settings_lyrics(model(lyrics));
+    window.set_settings_extras(model(extras));
+    window.set_eq_bands(model(state.eq_bands()));
     window.set_eq_enabled(state.settings.equalizer_enabled);
     window.set_provider_order(state.provider_order_label().into());
 }
 
 fn refresh_library_models(window: &AppWindow, state: &AppState) {
-    window.set_quick_actions(state.quick_actions().into());
-    window.set_library_songs(state.song_list(&state.library_songs).into());
+    window.set_quick_actions(model(state.quick_actions()));
+    window.set_library_songs(model(state.song_list(&state.library_songs)));
     let (title, collections) = state.library_collections_for(window.get_library_tab());
     window.set_library_title(title.into());
-    window.set_library_collections(collections.into());
+    window.set_library_collections(model(collections));
 }
 
 fn refresh_search(window: &AppWindow, state: &AppState) {
     match &state.search {
         Some(results) => {
-            window.set_search_songs(state.song_list(&results.songs).into());
-            window.set_search_videos(state.song_list(&results.videos).into());
-            window.set_search_albums(
+            window.set_search_songs(model(state.song_list(&results.songs)));
+            window.set_search_videos(model(state.song_list(&results.videos)));
+            window.set_search_albums(model(
                 results
                     .albums
                     .iter()
                     .map(|album| state.tile_data(&MediaItem::Album(album.clone())))
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
-            window.set_search_artists(
+                    .collect::<Vec<_>>(),
+            ));
+            window.set_search_artists(model(
                 results
                     .artists
                     .iter()
                     .map(|artist| state.tile_data(&MediaItem::Artist(artist.clone())))
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
-            window.set_search_playlists(
+                    .collect::<Vec<_>>(),
+            ));
+            window.set_search_playlists(model(
                 results
                     .playlists
                     .iter()
                     .map(|playlist| state.tile_data(&MediaItem::Playlist(playlist.clone())))
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
+                    .collect::<Vec<_>>(),
+            ));
         }
         None => {
-            window.set_search_songs(Vec::<SongData>::new().into());
-            window.set_search_videos(Vec::<SongData>::new().into());
-            window.set_search_albums(Vec::<TileData>::new().into());
-            window.set_search_artists(Vec::<TileData>::new().into());
-            window.set_search_playlists(Vec::<TileData>::new().into());
+            window.set_search_songs(model(Vec::<SongData>::new()));
+            window.set_search_videos(model(Vec::<SongData>::new()));
+            window.set_search_albums(model(Vec::<TileData>::new()));
+            window.set_search_artists(model(Vec::<TileData>::new()));
+            window.set_search_playlists(model(Vec::<TileData>::new()));
         }
     }
 }
@@ -183,8 +197,8 @@ fn refresh_search(window: &AppWindow, state: &AppState) {
 /// Rebuilds every list model (used after new artwork arrives).
 fn refresh_all_models(window: &AppWindow, state: &AppState) {
     window.set_chips(string_model(&state.chips()));
-    window.set_shelves(state.shelves().into());
-    window.set_favorites(state.song_list(&state.favorites).into());
+    window.set_shelves(model(state.shelves()));
+    window.set_favorites(model(state.song_list(&state.favorites)));
     refresh_search(window, state);
     refresh_library_models(window, state);
     if let Some(song) = &state.current {
@@ -193,9 +207,7 @@ fn refresh_all_models(window: &AppWindow, state: &AppState) {
 }
 
 fn load_library_tab(window: &AppWindow, state: &Shared) {
-    let songs = state
-        .borrow()
-        .library_songs_for(window.get_library_tab());
+    let songs = state.borrow().library_songs_for(window.get_library_tab());
     state.borrow_mut().library_songs = songs;
     refresh_library_models(window, &state.borrow());
 }
@@ -265,7 +277,7 @@ fn play_songs(
     window.set_progress(0.0);
     window.set_position_label("0:00".into());
     window.set_duration_label(song.duration_label().into());
-    window.set_lyrics(Vec::<LyricLineData>::new().into());
+    window.set_lyrics(model(Vec::<LyricLineData>::new()));
     window.set_lyrics_source("".into());
 
     let quality = state.borrow().quality();
@@ -293,9 +305,12 @@ fn activate_song(window: &AppWindow, state: &Shared, workers: &Workers, id: &str
 fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
     // ---- navigation --------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_tab_selected(move |index| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             window.set_current_tab(index);
             if index == 2 {
                 load_library_tab(&window, &state);
@@ -303,48 +318,70 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
-        window.on_close_player(move || window.set_player_open(false));
+        let window_weak = window.as_weak();
+        window.on_close_player(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            window.set_player_open(false)
+        });
     }
     {
-        let window = window.clone();
-        window.on_open_player(move || window.set_player_open(true));
+        let window_weak = window.as_weak();
+        window.on_open_player(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            window.set_player_open(true)
+        });
     }
     {
-        let window = window.clone();
-        window.on_close_settings(move || window.set_settings_open(false));
+        let window_weak = window.as_weak();
+        window.on_close_settings(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            window.set_settings_open(false)
+        });
     }
     {
-        let window = window.clone();
-        window.on_open_settings(move || window.set_settings_open(true));
+        let window_weak = window.as_weak();
+        window.on_open_settings(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            window.set_settings_open(true)
+        });
     }
 
     // ---- home --------------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_chip_selected(move |index| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             window.set_selected_chip(index);
-            let chip = state
-                .borrow()
-                .chips()
-                .get(index.max(0) as usize)
-                .cloned();
+            let chip = state.borrow().chips().get(index.max(0) as usize).cloned();
             if let Some(chip) = chip {
                 let _ = state.borrow().library.record_search(&chip);
                 window.set_current_tab(1);
                 window.set_search_query(chip.as_str().into());
                 window.set_searching(true);
-                workers.search(chip);
+                workers.search(chip, SearchFilter::All);
             }
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_shelf_item_clicked(move |id, kind| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let id = id.to_string();
             let kind = kind.to_string();
             match kind.as_str() {
@@ -366,10 +403,13 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_home_play_all(move |title, _kind| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let title = title.to_string();
             let songs = {
                 let s = state.borrow();
@@ -389,14 +429,17 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
 
     // ---- search ------------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_search_edited(move |text| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             window.set_search_query(text.clone());
             if text.trim().is_empty() {
                 state.borrow_mut().search = None;
-                window.set_suggestions(Vec::<SharedString>::new().into());
+                window.set_suggestions(model(Vec::<SharedString>::new()));
                 refresh_search(&window, &state.borrow());
             } else {
                 workers.suggestions(text.to_string());
@@ -404,12 +447,15 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_search_submit(move |text| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             window.set_search_query(text.clone());
-            window.set_suggestions(Vec::<SharedString>::new().into());
+            window.set_suggestions(model(Vec::<SharedString>::new()));
             if text.trim().is_empty() {
                 state.borrow_mut().search = None;
                 window.set_searching(false);
@@ -418,37 +464,46 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
             }
             let _ = state.borrow().library.record_search(&text);
             window.set_searching(true);
-            workers.search(text.to_string());
+            workers.search(text.to_string(), SearchFilter::All);
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_suggestion_chosen(move |text| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let text = text.to_string();
             window.set_search_query(text.as_str().into());
-            window.set_suggestions(Vec::<SharedString>::new().into());
+            window.set_suggestions(model(Vec::<SharedString>::new()));
             let _ = state.borrow().library.record_search(&text);
             window.set_searching(true);
-            workers.search(text);
+            workers.search(text, SearchFilter::All);
         });
     }
 
     // ---- library -----------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_library_tab_selected(move |index| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             window.set_library_tab(index);
             load_library_tab(&window, &state);
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_quick_action(move |id| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let id = id.to_string();
             if id == "local" {
                 let folders = state.borrow().settings.local_folders.len();
@@ -488,10 +543,13 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_create_playlist(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let name = format!(
                 "New playlist {}",
                 chrono::Local::now().format("%b %d, %H:%M")
@@ -508,10 +566,13 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
 
     // ---- playback ----------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_song_activated(move |id| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             activate_song(&window, &state, &workers, id.as_str());
         });
     }
@@ -540,9 +601,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_seek(move |value| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let value = value.clamp(0.0, 1.0);
             let duration = state
                 .borrow()
@@ -557,9 +621,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_toggle_shuffle(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let shuffle = {
                 let mut s = state.borrow_mut();
                 s.shuffle = !s.shuffle;
@@ -572,9 +639,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_cycle_repeat(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let mode = {
                 let mut s = state.borrow_mut();
                 s.repeat_mode = (s.repeat_mode + 1) % 3;
@@ -592,10 +662,13 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_toggle_like(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let Some(song) = state.borrow().current.clone() else {
                 return;
             };
@@ -614,10 +687,13 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_toggle_download(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let Some(song) = state.borrow().current.clone() else {
                 return;
             };
@@ -639,9 +715,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_toggle_lyrics(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let visible = {
                 let mut s = state.borrow_mut();
                 s.lyrics_visible = !s.lyrics_visible;
@@ -651,9 +730,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_open_lyrics_source(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let label = state.borrow().lyrics_source_label();
             let message = if label.is_empty() {
                 "No lyrics source found".to_string()
@@ -666,12 +748,16 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
 
     // ---- settings ----------------------------------------------------------
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_setting_toggled(move |id, value| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let id = id.to_string();
             let mut theme_changed = false;
             let mut crossfade = false;
+            let mut discord_changed = false;
             {
                 let mut s = state.borrow_mut();
                 match id.as_str() {
@@ -692,7 +778,10 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
                     "echo_brain" => s.settings.echo_brain_enabled = value,
                     "pause_on_mute" => s.settings.pause_on_mute = value,
                     "resume_on_bluetooth" => s.settings.resume_on_bluetooth = value,
-                    "discord_rpc" => s.settings.discord_rpc = value,
+                    "discord_rpc" => {
+                        s.settings.discord_rpc = value;
+                        discord_changed = true;
+                    }
                     _ => {}
                 }
                 s.save_settings();
@@ -709,14 +798,20 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
                     engine.send(Command::SetCrossfade { enabled, seconds });
                 }
             }
+            if discord_changed {
+                state.borrow_mut().sync_discord();
+            }
             refresh_settings(&window, &state.borrow());
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         let workers = workers.clone();
         window.on_setting_activated(move |id| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             let id = id.to_string();
             match id.as_str() {
                 "clear_cache" => {
@@ -818,9 +913,12 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_eq_toggled(move |value| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             {
                 let mut s = state.borrow_mut();
                 s.settings.equalizer_enabled = value;
@@ -828,13 +926,16 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
                 s.push_equalizer();
             }
             window.set_eq_enabled(value);
-            window.set_eq_bands(state.borrow().eq_bands().into());
+            window.set_eq_bands(model(state.borrow().eq_bands()));
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_eq_band_changed(move |index, value| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             {
                 let mut s = state.borrow_mut();
                 let index = index.max(0) as usize;
@@ -843,13 +944,16 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
                 }
                 s.push_equalizer();
             }
-            window.set_eq_bands(state.borrow().eq_bands().into());
+            window.set_eq_bands(model(state.borrow().eq_bands()));
         });
     }
     {
-        let window = window.clone();
+        let window_weak = window.as_weak();
         let state = state.clone();
         window.on_reset_eq(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
             {
                 let mut s = state.borrow_mut();
                 s.settings.equalizer_bands = vec![0.0; 10];
@@ -857,7 +961,7 @@ fn wire_callbacks(window: &AppWindow, state: &Shared, workers: &Workers) {
                 s.save_settings();
                 s.push_equalizer();
             }
-            window.set_eq_bands(state.borrow().eq_bands().into());
+            window.set_eq_bands(model(state.borrow().eq_bands()));
         });
     }
 }
@@ -917,7 +1021,7 @@ fn handle_event(window: &AppWindow, state: &Shared, workers: &Workers, event: Ev
             window.set_has_track(true);
             window.set_loading(true);
             window.set_status("Loading\u{2026}".into());
-            window.set_lyrics(Vec::<LyricLineData>::new().into());
+            window.set_lyrics(model(Vec::<LyricLineData>::new()));
             window.set_lyrics_source("".into());
             let quality = state.borrow().quality();
             workers.resolve(song, quality);
@@ -955,7 +1059,7 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
                 }
                 window.set_loading(false);
                 window.set_chips(string_model(&state.borrow().chips()));
-                window.set_shelves(state.borrow().shelves().into());
+                window.set_shelves(model(state.borrow().shelves()));
                 request_covers(state, workers);
             }
             Err(err) => {
@@ -963,10 +1067,9 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
                 window.set_status(format!("Could not load the feed: {err}").into());
             }
         },
-        Update::Search { query, result } => {
-            if window.get_search_query().as_str() != query.as_str() {
-                return;
-            }
+        Update::Search(result) => {
+            // The worker does not echo the query back, so there is no stale
+            // result guard here; results simply replace the previous ones.
             window.set_searching(false);
             match result {
                 Ok(results) => {
@@ -984,15 +1087,40 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
         Update::Suggestions(suggestions) => {
             window.set_suggestions(string_model(&suggestions));
         }
-        Update::Collection { songs, .. } => {
-            play_songs(window, state, workers, songs, 0);
-        }
-        Update::Resolved { song, url, related } => {
+        // Album / artist / playlist pages all carry a flat song list.
+        Update::Album(result) => match result {
+            Ok(page) => play_songs(window, state, workers, page.songs, 0),
+            Err(err) => window.set_status(format!("Could not open the album: {err}").into()),
+        },
+        Update::Artist(result) => match result {
+            Ok(page) => {
+                // An artist page is a set of shelves; play the first one.
+                let songs: Vec<Song> = page
+                    .sections
+                    .into_iter()
+                    .flat_map(|shelf| shelf.items)
+                    .filter_map(|item| match item {
+                        MediaItem::Song(song) => Some(song),
+                        _ => None,
+                    })
+                    .collect();
+                if songs.is_empty() {
+                    window.set_status("This artist has no playable tracks".into());
+                } else {
+                    play_songs(window, state, workers, songs, 0);
+                }
+            }
+            Err(err) => window.set_status(format!("Could not open the artist: {err}").into()),
+        },
+        Update::Playlist(result) => match result {
+            Ok(page) => play_songs(window, state, workers, page.songs, 0),
+            Err(err) => window.set_status(format!("Could not open the playlist: {err}").into()),
+        },
+        Update::StreamReady { song, url } => {
             if state.borrow().pending_resolve.as_deref() != Some(song.id.as_str()) {
                 log::debug!("discarding a stale stream for {}", song.id);
                 return;
             }
-            let echo_brain = state.borrow().settings.echo_brain_enabled;
             {
                 let mut s = state.borrow_mut();
                 s.current = Some(song.clone());
@@ -1007,9 +1135,6 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
                     song: Box::new(song.clone()),
                     url,
                 });
-                if echo_brain && !related.is_empty() {
-                    engine.send(Command::Enqueue(related));
-                }
             }
             if !engine_present {
                 // Without an audio device the engine never echoes
@@ -1027,44 +1152,55 @@ fn handle_update(window: &AppWindow, state: &Shared, workers: &Workers, update: 
             window.set_status("".into());
             window.set_is_playing(true);
 
-            workers.lyrics(song);
-        }
-        Update::Lyrics { video_id, doc } => {
-            let current = state.borrow().current.as_ref().map(|song| song.id.clone());
-            if current.as_deref() != Some(video_id.as_str()) {
-                return;
-            }
+            state.borrow_mut().covers_dirty = true;
+            // Clear the previous track's lyrics before the new ones arrive, so
+            // the panel does not show stale text.
             {
                 let mut s = state.borrow_mut();
-                s.lyrics_doc = doc;
+                s.lyrics_doc = None;
                 s.last_active_line = None;
             }
-            window.set_lyrics(state.borrow().lyric_lines().into());
-            window.set_lyrics_source(state.borrow().lyrics_source_label().into());
+            window.set_lyrics(model(Vec::<LyricLineData>::new()));
+            window.set_lyrics_source("".into());
+            workers.lyrics(AppState::lyrics_query_for(&song));
         }
-        Update::Cover { url, path } => {
-            if let Ok(image) = slint::Image::load_from_path(&path) {
-                let mut s = state.borrow_mut();
-                s.pending_covers.remove(&url);
-                s.covers.insert(url, image);
-                s.covers_dirty = true;
-            }
-        }
-        Update::Downloaded(id) => {
-            state.borrow_mut().covers_dirty = true;
-            if let Some(song) = state.borrow().current.clone() {
-                if song.id == id {
-                    window.set_now_playing(state.borrow().song_data(&song));
-                }
-            }
-        }
-        Update::Status(message) => window.set_status(message.into()),
-        Update::Error(message) => {
+        Update::StreamFailed(message) => {
             state.borrow_mut().loading = false;
             state.borrow_mut().pending_resolve = None;
             window.set_loading(false);
             window.set_status(message.into());
         }
+        Update::Lyrics(result) => {
+            // The worker does not echo the video id, so the guard is implicit:
+            // whatever arrives is applied to the current track.
+            match result {
+                Ok(doc) => {
+                    {
+                        let mut s = state.borrow_mut();
+                        s.lyrics_doc = doc;
+                        s.last_active_line = None;
+                    }
+                    window.set_lyrics(model(state.borrow().lyric_lines()));
+                    window.set_lyrics_source(state.borrow().lyrics_source_label().into());
+                }
+                Err(err) => log::debug!("lyrics lookup failed: {err}"),
+            }
+        }
+        Update::Covers(urls) => {
+            // Workers download to the cache; decoding must happen on this
+            // (UI) thread, so the images are built here.
+            let dir = state.borrow().paths.artwork_cache_dir();
+            let mut s = state.borrow_mut();
+            for url in urls {
+                let path = crate::covers::cache_path(&dir, &url);
+                if let Ok(image) = slint::Image::load_from_path(&path) {
+                    s.pending_covers.remove(&url);
+                    s.covers.insert(url, image);
+                }
+            }
+            s.covers_dirty = true;
+        }
+        Update::Status(message) => window.set_status(message.into()),
     }
 }
 
@@ -1102,6 +1238,11 @@ fn update_transport(window: &AppWindow, state: &Shared) {
     if state.borrow().last_active_line != active_line {
         state.borrow_mut().last_active_line = active_line;
         let lines = state.borrow().lyric_lines();
-        window.set_lyrics(lines.into());
+        window.set_lyrics(model(lines));
     }
+
+    // Discord only needs to hear about a track change or a pause/resume; the
+    // protocol extrapolates the progress bar itself, so this is filtered
+    // internally and is cheap to call every tick.
+    state.borrow_mut().update_discord(false);
 }

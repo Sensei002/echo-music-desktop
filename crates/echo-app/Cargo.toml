@@ -19,6 +19,7 @@ echo-core.workspace = true
 echo-innertube.workspace = true
 echo-playback.workspace = true
 echo-lyrics.workspace = true
+echo-discord.workspace = true
 
 slint.workspace = true
 anyhow.workspace = true

@@ -26,18 +26,13 @@ pub fn cache_path(dir: &Path, url: &str) -> PathBuf {
 /// Downloads `url` into the cache unless it is already there.
 ///
 /// Returns the cache path so the caller can load it on the UI thread.
-pub fn ensure_cached(
-    client: &reqwest::blocking::Client,
-    dir: &Path,
-    url: &str,
-) -> Result<PathBuf> {
+pub fn ensure_cached(client: &reqwest::blocking::Client, dir: &Path, url: &str) -> Result<PathBuf> {
     let path = cache_path(dir, url);
     if path.exists() {
         return Ok(path);
     }
 
-    std::fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create {}", dir.display()))?;
+    std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
 
     let response = client
         .get(url)
@@ -46,12 +41,13 @@ pub fn ensure_cached(
     if !response.status().is_success() {
         anyhow::bail!("artwork request returned HTTP {}", response.status());
     }
-    let bytes = response.bytes().context("failed to read the artwork body")?;
+    let bytes = response
+        .bytes()
+        .context("failed to read the artwork body")?;
 
     // Write to a temporary name first so a partial download never looks cached.
     let temp = path.with_extension("part");
-    std::fs::write(&temp, &bytes)
-        .with_context(|| format!("failed to write {}", temp.display()))?;
+    std::fs::write(&temp, &bytes).with_context(|| format!("failed to write {}", temp.display()))?;
     std::fs::rename(&temp, &path)
         .with_context(|| format!("failed to finalise {}", path.display()))?;
     Ok(path)

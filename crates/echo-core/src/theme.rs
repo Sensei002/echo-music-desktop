@@ -60,7 +60,11 @@ impl Rgb {
             return (0.0, 0.0, l);
         }
         let d = max - min;
-        let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+        let s = if l > 0.5 {
+            d / (2.0 - max - min)
+        } else {
+            d / (max + min)
+        };
         let h = if max == r {
             ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
         } else if max == g {
@@ -79,7 +83,11 @@ impl Rgb {
             let v = (l * 255.0).round() as u8;
             return Self::new(v, v, v);
         }
-        let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+        let q = if l < 0.5 {
+            l * (1.0 + s)
+        } else {
+            l + s - l * s
+        };
         let p = 2.0 * l - q;
         let channel = |mut t: f32| {
             if t < 0.0 {
@@ -303,7 +311,13 @@ mod tests {
 
     #[test]
     fn contrasting_text_flips() {
-        assert_eq!(Rgb::new(255, 255, 255).contrasting_text(), Rgb::new(0x11, 0x11, 0x11));
-        assert_eq!(Rgb::new(0, 0, 0).contrasting_text(), Rgb::new(0xFF, 0xFF, 0xFF));
+        assert_eq!(
+            Rgb::new(255, 255, 255).contrasting_text(),
+            Rgb::new(0x11, 0x11, 0x11)
+        );
+        assert_eq!(
+            Rgb::new(0, 0, 0).contrasting_text(),
+            Rgb::new(0xFF, 0xFF, 0xFF)
+        );
     }
 }

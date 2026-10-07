@@ -99,19 +99,39 @@ pub fn page_type_of(value: &serde_json::Value) -> Option<String> {
 /// Collects every thumbnail URL inside a renderer, largest last.
 pub fn thumbnails_of(value: &serde_json::Value) -> Vec<String> {
     let mut urls = Vec::new();
-    let candidates = [
-        ["thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails"],
-        ["thumbnailRenderer", "musicThumbnailRenderer", "thumbnail", "thumbnails"],
-        ["thumbnail", "thumbnails"],
+    // Paths have differing lengths, so they are `&[&str]` slices rather than
+    // fixed-size arrays (which would force a uniform element count).
+    let candidates: [&[&str]; 3] = [
+        &[
+            "thumbnail",
+            "musicThumbnailRenderer",
+            "thumbnail",
+            "thumbnails",
+        ],
+        &[
+            "thumbnailRenderer",
+            "musicThumbnailRenderer",
+            "thumbnail",
+            "thumbnails",
+        ],
+        &["thumbnail", "thumbnails"],
     ];
     for path in candidates {
-        if let Some(list) = value
-            .get(path[0])
-            .and_then(|v| v.get(path[1]))
-            .and_then(|v| v.get(path[2]))
-            .and_then(|v| v.get(path[3]))
-            .and_then(|v| v.as_array())
-        {
+        let mut node = value;
+        let mut found = true;
+        for key in path {
+            match node.get(key) {
+                Some(next) => node = next,
+                None => {
+                    found = false;
+                    break;
+                }
+            }
+        }
+        if !found {
+            continue;
+        }
+        if let Some(list) = node.as_array() {
             for entry in list {
                 if let Some(url) = entry.get("url").and_then(|v| v.as_str()) {
                     urls.push(url.to_string());

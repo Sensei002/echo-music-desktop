@@ -126,7 +126,8 @@ impl Library {
     }
 
     fn from_connection(conn: Connection) -> Result<Self> {
-        conn.execute_batch(SCHEMA).context("failed to apply library schema")?;
+        conn.execute_batch(SCHEMA)
+            .context("failed to apply library schema")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -415,7 +416,13 @@ impl Library {
              ON CONFLICT(song_id) DO UPDATE SET
                 path = excluded.path, quality = excluded.quality,
                 size_bytes = excluded.size_bytes, downloaded_at = excluded.downloaded_at",
-            params![&song.id, path, quality, size_bytes.map(|v| v as i64), now_ms()],
+            params![
+                &song.id,
+                path,
+                quality,
+                size_bytes.map(|v| v as i64),
+                now_ms()
+            ],
         )?;
         Ok(())
     }
@@ -486,9 +493,8 @@ impl Library {
 
     pub fn search_history(&self, limit: usize) -> Result<Vec<String>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT query FROM search_history ORDER BY searched_at DESC LIMIT ?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT query FROM search_history ORDER BY searched_at DESC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -513,9 +519,11 @@ impl Library {
             playlists: count("playlists")?,
             downloads: count("downloads")?,
             plays: conn
-                .query_row("SELECT COALESCE(SUM(play_count), 0) FROM history", [], |row| {
-                    row.get::<_, i64>(0)
-                })
+                .query_row(
+                    "SELECT COALESCE(SUM(play_count), 0) FROM history",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
                 .map(|v| v as u64)?,
         })
     }
@@ -564,7 +572,10 @@ mod tests {
         lib.like_song(&s).unwrap();
         assert!(lib.is_liked("a").unwrap());
         assert_eq!(lib.liked_songs().unwrap().len(), 1);
-        assert_eq!(lib.liked_songs().unwrap()[0].artists, vec!["Artist".to_string()]);
+        assert_eq!(
+            lib.liked_songs().unwrap()[0].artists,
+            vec!["Artist".to_string()]
+        );
         lib.unlike_song("a").unwrap();
         assert!(!lib.is_liked("a").unwrap());
     }
@@ -605,6 +616,9 @@ mod tests {
         assert_eq!(lib.downloads().unwrap()[0].size_bytes, Some(1234));
         lib.record_search("daft punk").unwrap();
         lib.record_search("daft punk").unwrap();
-        assert_eq!(lib.search_history(5).unwrap(), vec!["daft punk".to_string()]);
+        assert_eq!(
+            lib.search_history(5).unwrap(),
+            vec!["daft punk".to_string()]
+        );
     }
 }

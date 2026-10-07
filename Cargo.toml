@@ -5,6 +5,7 @@ members = [
     "crates/echo-innertube",
     "crates/echo-playback",
     "crates/echo-lyrics",
+    "crates/echo-discord",
     "crates/echo-app",
 ]
 default-members = ["crates/echo-app"]
@@ -24,6 +25,7 @@ echo-core = { path = "crates/echo-core" }
 echo-innertube = { path = "crates/echo-innertube" }
 echo-playback = { path = "crates/echo-playback" }
 echo-lyrics = { path = "crates/echo-lyrics" }
+echo-discord = { path = "crates/echo-discord" }
 
 # ---- serialization ---------------------------------------------------------
 serde = { version = "1", features = ["derive"] }
@@ -74,8 +76,12 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 
 # ---- UI --------------------------------------------------------------------
-slint = "1.8"
-slint-build = "1.8"
+# Pinned to the exact released minor+patch. Slint's declarative API still moves
+# between patch releases (`vertical-alignment` on non-Text elements, the
+# `TextInput.edited` signature, `ScrollView` moving into `std-widgets`), so a
+# bare "1.8" caret requirement silently resolves to 1.18 and breaks the build.
+slint = "=1.18.1"
+slint-build = "=1.18.1"
 
 [profile.release]
 opt-level = 3

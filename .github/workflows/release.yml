@@ -1,8 +1,12 @@
 name: Release
 
 # Publishes a GitHub Release every time a `v*` tag is pushed. The tag is the
-# version — for example `v1.4.0` produces release `v1.4.0` with packaged
-# binaries for Windows, macOS and Linux.
+# version - for example `v1.4.0` produces release `v1.4.0` with a packaged
+# Windows binary.
+#
+# Windows x64 only for now; Linux and macOS were dropped because the workspace
+# did not build on either host. Add rows back to the matrix once those
+# platforms can be built and verified.
 #
 # Cut a release with:
 #   git tag v1.4.0 && git push origin v1.4.0
@@ -29,105 +33,75 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build a packaged artifact for each platform.
+  # Build the packaged Windows artifact.
   # ---------------------------------------------------------------------------
   build:
-    name: Package (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: windows-x86_64
-            ext: .exe
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: linux-x86_64
-            ext: ""
-          - os: macos-14
-            target: aarch64-apple-darwin
-            label: macos-aarch64
-            ext: ""
-          - os: macos-13
-            target: x86_64-apple-darwin
-            label: macos-x86_64
-            ext: ""
-
+    name: Package (x86_64-pc-windows-msvc)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev \
-            libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
-            libxcb-randr0-dev libxcb-composite0-dev libxcb-keysyms1-dev \
-            libxcb-image0-dev libxcb-icccm4-dev libxcb-xkb-dev \
-            libxcb-sync-dev libxcb-xinerama0-dev libxcb-cursor-dev \
-            libx11-dev libx11-xcb-dev libgl1-mesa-dev libegl1-mesa-dev
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: windows-release
+
+      # See the note in ci.yml: Git for Windows ships a GNU `link.exe` that
+      # shadows the MSVC linker and breaks every link step.
+      - name: Put the MSVC linker ahead of Git's
+        shell: pwsh
+        run: |
+          $roots = @()
+          if ($env:MSYS2_ROOT) { $roots += $env:MSYS2_ROOT.TrimEnd('\') }
+          $roots += @(
+            'C:\Program Files\Git',
+            'C:\Program Files (x86)\Git',
+            "$env:LOCALAPPDATA\Programs\Git"
+          ) | Where-Object { Test-Path $_ }
+
+          if ($roots.Count -eq 0) {
+            Write-Host 'No Git-for-Windows installation found; leaving PATH alone.'
+          }
+
+          $keep = $env:PATH -split ';' | Where-Object {
+            $entry = $_
+            if ([string]::IsNullOrWhiteSpace($entry)) { return $false }
+            foreach ($root in $roots) {
+              if ($entry -like "$root*") {
+                Write-Host "dropping from PATH: $entry"
+                return $false
+              }
+            }
+            return $true
+          }
+          "PATH=$($keep -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }} -p echo-app
-
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-          fi
-          BIN="target/${{ matrix.target }}/release/echo-music-desktop"
-          STAGE="echo-music-desktop-${VERSION}-${{ matrix.label }}"
-          mkdir -p "$STAGE"
-          cp "$BIN" "$STAGE/"
-          cp README.md LICENSE "$STAGE/" 2>/dev/null || true
-          cp -r assets "$STAGE/assets" 2>/dev/null || true
-          tar -czf "${STAGE}.tar.gz" "$STAGE"
-          echo "ARTIFACT=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p echo-app
 
       - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          VERSION="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-          fi
-          BIN="target/${{ matrix.target }}/release/echo-music-desktop.exe"
-          STAGE="echo-music-desktop-${VERSION}-${{ matrix.label }}"
-          mkdir -p "$STAGE"
-          cp "$BIN" "$STAGE/"
-          cp README.md LICENSE "$STAGE/" 2>/dev/null || true
-          cp -r assets "$STAGE/assets" 2>/dev/null || true
-          7z a "${STAGE}.zip" "$STAGE" > /dev/null
-          echo "ARTIFACT=${STAGE}.zip" >> "$GITHUB_ENV"
+          $version = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { "${{ inputs.version }}" } else { $env:GITHUB_REF_NAME }
+          $stage = "echo-music-desktop-$version-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/echo-music-desktop.exe" $stage
+          Copy-Item README.md, LICENSE $stage
+          Copy-Item -Recurse assets "$stage/assets"
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip" -Force
+          "ARTIFACT=$stage.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
+          name: windows-x86_64
           path: ${{ env.ARTIFACT }}
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Publish the release and attach every packaged artifact.
+  # Publish the release and attach the packaged artifact.
   # ---------------------------------------------------------------------------
   release:
     name: Publish release
@@ -168,20 +142,16 @@ jobs:
           body: |
             ## Echo Music Desktop ${{ steps.version.outputs.tag }}
 
-            Ad-free YouTube Music streaming, synced lyrics and offline playback —
+            Ad-free YouTube Music streaming, synced lyrics and offline playback -
             the desktop port of [Echo Music](https://github.com/EchoMusicApp/Echo-Music).
 
             ### Downloads
             | Platform | File |
             |---|---|
             | Windows (x64) | `echo-music-desktop-*-windows-x86_64.zip` |
-            | Linux (x64) | `echo-music-desktop-*-linux-x86_64.tar.gz` |
-            | macOS (Apple Silicon) | `echo-music-desktop-*-macos-aarch64.tar.gz` |
-            | macOS (Intel) | `echo-music-desktop-*-macos-x86_64.tar.gz` |
 
             ### Running
-            Extract the archive and launch `echo-music-desktop`. On Linux you may
-            need `libasound2` and `libfontconfig1` from your distribution.
+            Extract the archive and launch `echo-music-desktop.exe`.
 
             > Echo Music hosts no copyrighted material. It is a client that streams
             > publicly available YouTube Music content. Support the artists you love

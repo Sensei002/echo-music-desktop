@@ -1,0 +1,15 @@
+[package]
+name = "echo-discord"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Discord Rich Presence IPC client for Echo Music Desktop."
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true

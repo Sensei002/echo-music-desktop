@@ -22,7 +22,7 @@ impl Queue {
     /// Replaces the queue contents and positions the cursor on `start`.
     pub fn set_songs(&mut self, songs: Vec<Song>, start: usize) {
         self.songs = songs;
-        self.rebuild_order(start);
+        self.rebuild_order(Some(start));
     }
 
     /// Appends tracks to the end of the queue.
@@ -166,15 +166,29 @@ impl Queue {
             .order
             .iter()
             .filter(|index| **index != song_index)
-            .map(|index| if *index > song_index { *index - 1 } else { *index })
+            .map(|index| {
+                if *index > song_index {
+                    *index - 1
+                } else {
+                    *index
+                }
+            })
             .collect();
         if order.is_empty() {
             self.order = order;
             self.cursor = 0;
             return;
         }
-        let cursor_shift = self.order.iter().take(self.cursor).filter(|i| **i == song_index).count();
-        self.cursor = self.cursor.saturating_sub(cursor_shift).min(order.len() - 1);
+        let cursor_shift = self
+            .order
+            .iter()
+            .take(self.cursor)
+            .filter(|i| **i == song_index)
+            .count();
+        self.cursor = self
+            .cursor
+            .saturating_sub(cursor_shift)
+            .min(order.len() - 1);
         if was_current {
             self.cursor = self.cursor.min(order.len() - 1);
         }
@@ -278,7 +292,15 @@ mod tests {
     fn enqueue_appends() {
         let mut queue = Queue::new();
         queue.set_songs(songs(2), 0);
-        queue.enqueue(songs(3).into_iter().map(|mut s| { s.id = format!("x{}", s.id); s }).collect());
+        queue.enqueue(
+            songs(3)
+                .into_iter()
+                .map(|mut s| {
+                    s.id = format!("x{}", s.id);
+                    s
+                })
+                .collect(),
+        );
         assert_eq!(queue.len(), 5);
     }
 

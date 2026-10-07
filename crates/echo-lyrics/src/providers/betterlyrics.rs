@@ -12,10 +12,8 @@ const BASE: &str = "https://lyrics-api.boidu.dev";
 
 /// Fetches lyrics from BetterLyrics.
 pub fn fetch(client: &reqwest::blocking::Client, query: &LyricsQuery) -> Result<Option<RawLyrics>> {
-    let mut params: Vec<(&str, String)> = vec![
-        ("s", query.title.clone()),
-        ("a", query.artist.clone()),
-    ];
+    let mut params: Vec<(&str, String)> =
+        vec![("s", query.title.clone()), ("a", query.artist.clone())];
     if let Some(duration) = query.duration_secs {
         params.push(("d", duration.to_string()));
     }
@@ -53,5 +51,8 @@ pub fn fetch(client: &reqwest::blocking::Client, query: &LyricsQuery) -> Result<
         return Ok(None);
     }
 
-    Ok(Some(RawLyrics::new(payload.clone(), detect_format(&payload))))
+    Ok(Some(RawLyrics::new(
+        payload.clone(),
+        detect_format(&payload),
+    )))
 }

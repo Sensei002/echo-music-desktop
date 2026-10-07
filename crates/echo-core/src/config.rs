@@ -10,6 +10,20 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// The Discord application id used for Rich Presence when the user has not
+/// supplied their own.
+///
+/// Kept here rather than in `echo-discord` so settings can be loaded and saved
+/// without pulling in the presence client. Rich Presence artwork assets are
+/// registered against this application, so changing it changes which images
+/// Discord is able to render.
+pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1179128917280403576";
+
+/// The bundled Discord application id.
+fn echo_discord_id() -> String {
+    DEFAULT_DISCORD_CLIENT_ID.to_string()
+}
+
 /// Which colour scheme to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -113,6 +127,14 @@ pub struct Settings {
     pub pause_on_mute: bool,
     pub resume_on_bluetooth: bool,
     pub discord_rpc: bool,
+    /// Discord application id used for Rich Presence.
+    ///
+    /// Users who register their own Discord application (and upload the
+    /// artwork assets to it) can override this; otherwise the bundled id is
+    /// used. Stored as a string because it is a snowflake, not a number.
+    pub discord_client_id: String,
+    /// Show the elapsed/remaining progress bar in the Discord presence.
+    pub discord_show_timestamps: bool,
     pub listen_together_name: String,
 
     // ---- equalizer ---------------------------------------------------------
@@ -187,6 +209,8 @@ impl Default for Settings {
             pause_on_mute: false,
             resume_on_bluetooth: true,
             discord_rpc: false,
+            discord_client_id: String::new(),
+            discord_show_timestamps: true,
             listen_together_name: "Echo Listener".into(),
 
             equalizer_enabled: false,
@@ -256,6 +280,20 @@ impl Settings {
         if self.theme_color.is_empty() {
             self.theme_color = ECHO_SEED.to_hex();
         }
+        self.discord_client_id = self.discord_client_id.trim().to_string();
+    }
+
+    /// The Discord application id to use, falling back to the bundled one.
+    ///
+    /// An empty or whitespace-only value means "use the default", which keeps
+    /// the setting genuinely optional rather than forcing every user to paste
+    /// an id that most of them do not have.
+    pub fn discord_application_id(&self) -> String {
+        if self.discord_client_id.trim().is_empty() {
+            echo_discord_id()
+        } else {
+            self.discord_client_id.trim().to_string()
+        }
     }
 }
 
@@ -273,9 +311,11 @@ mod tests {
 
     #[test]
     fn round_trips_through_json() {
-        let mut s = Settings::default();
-        s.theme_mode = ThemeMode::Dark;
-        s.volume = 0.42;
+        let s = Settings {
+            theme_mode: ThemeMode::Dark,
+            volume: 0.42,
+            ..Settings::default()
+        };
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.theme_mode, ThemeMode::Dark);
@@ -291,10 +331,12 @@ mod tests {
 
     #[test]
     fn sanitize_clamps() {
-        let mut s = Settings::default();
-        s.volume = 9.0;
-        s.ui_scale = 12.0;
-        s.equalizer_bands = vec![1.0];
+        let mut s = Settings {
+            volume: 9.0,
+            ui_scale: 12.0,
+            equalizer_bands: vec![1.0],
+            ..Settings::default()
+        };
         s.sanitize();
         assert_eq!(s.volume, 1.0);
         assert_eq!(s.ui_scale, 1.4);

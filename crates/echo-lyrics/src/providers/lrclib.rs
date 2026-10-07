@@ -14,9 +14,14 @@ const BASE: &str = "https://lrclib.net";
 
 #[derive(Debug, Clone, Deserialize)]
 struct Track {
+    // Deserialised so serde rejects malformed entries and so the field is
+    // available for future matching heuristics. The duration and the lyric
+    // bodies are what selection actually uses today.
     #[serde(rename = "trackName", default)]
+    #[allow(dead_code)]
     track_name: String,
     #[serde(rename = "artistName", default)]
+    #[allow(dead_code)]
     artist_name: String,
     #[serde(default)]
     duration: f64,
@@ -88,13 +93,19 @@ pub fn fetch(client: &reqwest::blocking::Client, query: &LyricsQuery) -> Result<
         return Ok(None);
     };
 
-    if let Some(synced) = best.synced_lyrics.filter(|text| !text.trim().is_empty()) {
-        return Ok(Some(RawLyrics::new(synced, LyricsFormat::Lrc)));
+    // `best` is a borrow of `usable`, so the fields cannot be moved out of it.
+    // Cloning the chosen document is the cheap option here: it happens once per
+    // track, and `RawLyrics` takes ownership anyway.
+    let non_empty = |text: &String| !text.trim().is_empty();
+
+    if let Some(synced) = best.synced_lyrics.as_ref().filter(|text| non_empty(text)) {
+        return Ok(Some(RawLyrics::new(synced.clone(), LyricsFormat::Lrc)));
     }
     Ok(best
         .plain_lyrics
-        .filter(|text| !text.trim().is_empty())
-        .map(|text| RawLyrics::new(text, LyricsFormat::Plain)))
+        .as_ref()
+        .filter(|text| non_empty(text))
+        .map(|text| RawLyrics::new(text.clone(), LyricsFormat::Plain)))
 }
 
 fn search(client: &reqwest::blocking::Client, params: &[(&str, &str)]) -> Result<Vec<Track>> {
@@ -145,7 +156,11 @@ mod tests {
 
     #[test]
     fn picks_the_closest_duration() {
-        let tracks = vec![track("a", 100.0, true), track("b", 197.0, true), track("c", 400.0, true)];
+        let tracks = vec![
+            track("a", 100.0, true),
+            track("b", 197.0, true),
+            track("c", 400.0, true),
+        ];
         assert_eq!(pick_best(&tracks, Some(196)).unwrap().track_name, "b");
     }
 

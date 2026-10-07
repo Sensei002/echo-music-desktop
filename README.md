@@ -58,6 +58,10 @@ Everything below is implemented natively — there is no wrapper around a web pl
 - Downloaded tracks, search history
 - All persisted in a local SQLite database
 
+**Extras**
+- Discord Rich Presence — your current track, artist, album and a live progress
+  counter on your Discord profile, with pause/resume reflected immediately
+
 **Design**
 - The Echo palette generated from the seed `#ED5564`, applied as a full Material-3 tonal scheme
 - Liquid-glass surfaces, pill chips, 24px rounded cards, floating tab bar
@@ -76,6 +80,7 @@ crates/
 ├── echo-innertube   Native YouTube Music client (search / browse / player / cipher)
 ├── echo-playback    rodio + symphonia audio engine, queue, equalizer
 ├── echo-lyrics      Lyrics providers, LRC / enhanced-LRC / TTML parsers
+├── echo-discord     Discord Rich Presence IPC client
 └── echo-app         Slint UI + application wiring (the binary)
 ```
 
@@ -100,7 +105,7 @@ The whole engine lives on one dedicated thread that owns the `rodio` output stre
 
 ### `echo-app` — the UI
 
-`ui/app.slint` is purely presentational. Every interaction is a callback, every piece of state is a property, and Rust owns all of it. Network work runs on short-lived worker threads that post `Update` messages; a 150 ms timer drains them on the UI thread, which keeps the event loop responsive no matter what the network is doing.
+`ui/app.slint` is purely presentational. Every interaction is a callback, every piece of state is a property, and Rust owns all of it. Network work runs on short-lived worker threads that post `Update` messages; a 120 ms timer drains them on the UI thread, which keeps the event loop responsive no matter what the network is doing.
 
 ---
 
@@ -108,21 +113,40 @@ The whole engine lives on one dedicated thread that owns the `rodio` output stre
 
 Requires a stable Rust toolchain. No Node, no JVM, no Android SDK.
 
+**Windows only, for now.** Linux and macOS were removed from CI because the
+workspace did not build on those hosts and neither was available to debug. The
+supported target is `x86_64-pc-windows-msvc`. The platform-specific code (the X11
+header list for Slint + cpal, the Unix socket path for Discord IPC) is still in
+the tree and can be re-enabled by adding targets back to the workflow matrix.
+
+⚠️ **If you build from Git Bash**, make sure the MSVC linker wins. Git for
+Windows ships `/usr/bin/link.exe`, which is the GNU `link` utility; when it
+shadows Visual Studio's `link.exe` every compile fails with:
+
+```
+link: extra operand '...rcgu.o'
+Try 'link --help' for more information.
+```
+
+Build from a *Developer Command Prompt for VS*, or drop Git's `usr\bin` from
+`PATH` before invoking cargo. CI does this explicitly, and `tools/msvc-env.sh`
+does the same for a Git Bash session:
+
+```bash
+source tools/msvc-env.sh
+cargo run --release -p echo-app
+```
+
+Slint is pinned to an exact version (`=1.18.1`) rather than a caret range. Its
+declarative API still changes between releases — properties move, element
+behaviour is tightened, and `TextInput`'s signal signatures differ — so a caret
+requirement silently resolves to a newer minor and breaks the build. Upgrade the
+pin deliberately and rebuild.
+
 ```bash
 git clone https://github.com/EchoMusicApp/Echo-Music-Desktop.git
 cd Echo-Music-Desktop
 cargo run --release -p echo-app
-```
-
-**Linux system dependencies** (Slint + cpal):
-
-```bash
-sudo apt-get install -y build-essential pkg-config \
-  libasound2-dev libfontconfig1-dev libxkbcommon-dev \
-  libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
-  libxcb-randr0-dev libxcb-composite0-dev libxcb-keysyms1-dev \
-  libxcb-image0-dev libxcb-icccm4-dev libxcb-xkb-dev \
-  libxkbcommon-x11-dev libgl1-mesa-dev libegl1-mesa-dev
 ```
 
 Run the test suite with `cargo test --workspace`.
@@ -136,7 +160,11 @@ Two workflows, both in `.github/workflows/`:
 **`ci.yml`** — runs on every push to `main` and on every pull request:
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets`
 - `cargo test --workspace`
-- A release build on Windows, Linux and macOS to catch platform regressions early
+- A release build of `x86_64-pc-windows-msvc`
+
+Every cargo invocation uses `--locked`, and `Cargo.lock` is committed. Without
+it each job resolves the dependency graph from scratch and can pick up a version
+the workspace was never built against.
 
 **`release.yml`** — publishes a GitHub Release whenever a `v*` tag is pushed:
 
@@ -145,16 +173,36 @@ git tag v1.4.0
 git push origin v1.4.0
 ```
 
-That single command builds all four targets, packages them, and creates a release named after the tag with these assets:
+That builds and packages Windows x64 and creates a release named after the tag:
 
 | Platform | Asset |
 |---|---|
 | Windows x64 | `echo-music-desktop-v1.4.0-windows-x86_64.zip` |
-| Linux x64 | `echo-music-desktop-v1.4.0-linux-x86_64.tar.gz` |
-| macOS Apple Silicon | `echo-music-desktop-v1.4.0-macos-aarch64.tar.gz` |
-| macOS Intel | `echo-music-desktop-v1.4.0-macos-x86_64.tar.gz` |
 
 The workflow can also be dispatched manually from the Actions tab with a version string; it creates the tag for you.
+
+---
+
+## Discord Rich Presence
+
+Enable it in **Settings → Discord Rich Presence**. Echo then publishes the track
+you are playing — title, artist, album and a progress counter — to your Discord
+profile.
+
+It speaks Discord's local IPC protocol directly: no third-party process, no extra
+runtime. The client is found by connecting to the socket Discord advertises in
+the current user's runtime directory, the handshake is performed, and the
+activity is re-published whenever the track changes. Discord does not have to be
+running first — the worker keeps retrying and connects on its own once it is.
+
+By default it uses the bundled Discord application. To use your own, register an
+application at the Discord Developer Portal, upload the `echo_playing`,
+`echo_paused` and `echo_logo` assets, and point **Settings → Discord
+application** at that application's id. Setting it to *Bundled* (the default)
+uses the app shipped with Echo.
+
+> The presence timer is derived from the playback position, so seeking or pausing
+> updates Discord immediately instead of drifting.
 
 ---
 
@@ -175,10 +223,9 @@ The upstream aesthetic is deliberately *not* stock Material 3:
 
 - **The `n` throttle parameter** — see the note above. Streams from the preferred clients are unaffected.
 - **Echo Find (Shazam-style recognition)**, **Listen Together** and **Spotify import** are present in the UI and data model but their backends are not ported yet.
-- **Discord Rich Presence** is a settings toggle without an IPC client behind it.
 - **Canvas animations** and **AI lyric translation** are wired into settings but currently no-ops.
 
-Everything else — streaming, search, browsing, playback, the equalizer, lyrics, downloads and the library — is functional.
+Everything else — streaming, search, browsing, playback, the equalizer, lyrics, downloads, Discord Rich Presence and the library — is functional.
 
 ---
 

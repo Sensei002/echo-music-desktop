@@ -72,14 +72,25 @@ impl Cipher {
 }
 
 static DECIPHER_DEF: Lazy<Regex> = Lazy::new(|| {
+    // Matches `NAME = function (ARG) { ... ARG = ARG.split(""); ...`
+    //
+    // The pattern deliberately ends right after `split("")` — brace matching
+    // (`locate_decipher_function`) walks the body from the captured `{`, because
+    // a regex cannot reliably pair nested braces.
+    //
+    // Two constraints shape this pattern:
+    //   * The `regex` crate is a finite-automata engine with NO backreference
+    //     support, so `(?P=arg)` is illegal here (it fails at compile time with
+    //     "unrecognized flag"). The assignment is therefore matched as
+    //     `IDENT = IDENT.split("")` and the caller does not rely on the two
+    //     identifiers being textually equal.
+    //   * The quotes around the empty split argument are written `\"` rather
+    //     than `"`: a raw string only terminates on `"#`, so `\"` stays inside
+    //     the literal and the regex reads it as a literal quote.
     Regex::new(
-        r"(?P<name>[A-Za-z0-9_$]+)\s*=\s*function\s*\(\s*(?P<arg>[A-Za-z0-9_$]+)\s*\)\s*(?P<open>\{)\s*(?P<arg2>[A-Za-z0-9_$]+)\s*=\s*(?P=arg)\s*\.\s*split\s*\(\s*""\s*\)",
+        r#"(?P<name>[A-Za-z0-9_$]+)\s*=\s*function\s*\(\s*[A-Za-z0-9_$]+\s*\)\s*(?P<open>\{)\s*[A-Za-z0-9_$]+\s*=\s*[A-Za-z0-9_$]+\s*\.\s*split\s*\(\s*\"\s*\"\s*\)"#,
     )
     .expect("valid regex")
-});
-
-static HELPER_OBJ: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?P<obj>[A-Za-z0-9_$]+)\s*=\s*\{(?P<body>[^{}]*)\}").expect("valid regex")
 });
 
 static OP_CALL: Lazy<Regex> = Lazy::new(|| {
@@ -293,14 +304,20 @@ mod tests {
             var QW = function(a) { a = a.split(""); XY.ef(a, 21); XY.ab(a); XY.cd(a, 3); return a.join(""); };
         "#;
         let cipher = Cipher::parse(js).expect("should parse");
-        assert_eq!(cipher.ops, vec![SigOp::Swap(21), SigOp::Reverse, SigOp::Slice(3)]);
+        assert_eq!(
+            cipher.ops,
+            vec![SigOp::Swap(21), SigOp::Reverse, SigOp::Slice(3)]
+        );
         assert!(!cipher.is_identity());
     }
 
     #[test]
     fn balanced_body_matches_nested_braces() {
         let source = "{ outer { inner } tail }";
-        assert_eq!(balanced_body(source, 0).as_deref(), Some(" outer { inner } tail "));
+        assert_eq!(
+            balanced_body(source, 0).as_deref(),
+            Some(" outer { inner } tail ")
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! so moving a slider takes effect immediately — no need to restart playback.
 
 use parking_lot::Mutex;
-use rodio::Source;
+use rodio::{Sample, Source};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -131,7 +131,9 @@ impl EqConfig {
     pub fn preset(name: &str) -> Self {
         let gains: Vec<f32> = match name {
             "bass_boost" | "Bass boost" => vec![6.0, 5.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            "treble_boost" | "Treble boost" => vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 3.0, 4.0, 5.0, 6.0],
+            "treble_boost" | "Treble boost" => {
+                vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 3.0, 4.0, 5.0, 6.0]
+            }
             "vocal" | "Vocal" => vec![-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
             "loudness" | "Loudness" => vec![5.0, 4.0, 1.0, 0.0, -1.0, 0.0, 1.0, 3.0, 4.0, 5.0],
             "rock" | "Rock" => vec![4.0, 3.0, 1.0, -1.0, -2.0, -1.0, 1.0, 3.0, 4.0, 4.0],
@@ -198,8 +200,23 @@ impl EqHandle {
     }
 }
 
+/// A boxed source of `f32` samples.
+///
+/// Kept as a convenient alias for callers that already have float material.
+pub trait FloatSource: Source<Item = f32> {}
+impl<T: Source<Item = f32>> FloatSource for T {}
+
 /// Wraps a source with the equalizer and stereo widener.
-pub struct EqualizerSource<S: Source> {
+///
+/// The biquad filters and the stereo widener are inherently floating point, so
+/// this normalises whatever the decoder yields to `f32` on the way in and emits
+/// `f32` on the way out. `rodio`'s decoders hand back `i16`, which is why the
+/// input is generic rather than assumed to already be float.
+pub struct EqualizerSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
     inner: S,
     handle: EqHandle,
     seen_version: u64,
@@ -208,7 +225,11 @@ pub struct EqualizerSource<S: Source> {
     pending: VecDeque<f32>,
 }
 
-impl<S: Source> EqualizerSource<S> {
+impl<S> EqualizerSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
     pub fn new(inner: S, handle: EqHandle) -> Self {
         let channels = inner.channels();
         let sample_rate = inner.sample_rate() as f32;
@@ -251,7 +272,11 @@ fn build_filters(sample_rate: f32, config: &EqConfig) -> Vec<Biquad> {
         .collect()
 }
 
-impl<S: Source> Iterator for EqualizerSource<S> {
+impl<S> Iterator for EqualizerSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
@@ -266,7 +291,10 @@ impl<S: Source> Iterator for EqualizerSource<S> {
         let mut frame = Vec::with_capacity(channels);
         for _ in 0..channels {
             match self.inner.next() {
-                Some(sample) => frame.push(sample),
+                // `to_f32` is rodio's normalisation for any supported sample
+                // width, so `i16` input lands in the same -1.0..=1.0 range the
+                // filters expect.
+                Some(sample) => frame.push(sample.to_f32()),
                 None => break,
             }
         }
@@ -307,7 +335,11 @@ impl<S: Source> Iterator for EqualizerSource<S> {
     }
 }
 
-impl<S: Source> Source for EqualizerSource<S> {
+impl<S> Source for EqualizerSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
     fn current_frame_len(&self) -> Option<usize> {
         self.inner.current_frame_len()
     }

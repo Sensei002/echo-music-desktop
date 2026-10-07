@@ -1,10 +1,10 @@
 //! High-level YouTube Music endpoints built on the InnerTube transport.
 
-use crate::clients::{self, WEB_REMIX};
+use crate::clients::WEB_REMIX;
 use crate::http::InnerTube;
 use crate::parse;
 use crate::util::{run_text, runs_of, text_of};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use echo_core::{
     Album, AlbumPage, Artist, ArtistPage, HomePage, MediaItem, Playlist, PlaylistPage,
     SearchResults, Shelf, Song,
@@ -114,7 +114,9 @@ pub fn album(it: &InnerTube, browse_id: &str) -> Result<AlbumPage> {
     let shelves = parse::collect_shelves(&response);
 
     let album = detail_header(&response)
-        .and_then(|header| parse::parse_titled_item(header, Some("MUSIC_PAGE_TYPE_ALBUM"), Some(browse_id)))
+        .and_then(|header| {
+            parse::parse_titled_item(header, Some("MUSIC_PAGE_TYPE_ALBUM"), Some(browse_id))
+        })
         .and_then(|item| match item {
             MediaItem::Album(album) => Some(album),
             _ => None,
@@ -149,7 +151,9 @@ pub fn album(it: &InnerTube, browse_id: &str) -> Result<AlbumPage> {
 pub fn artist(it: &InnerTube, browse_id: &str) -> Result<ArtistPage> {
     let response = browse(it, browse_id)?;
     let artist = detail_header(&response)
-        .and_then(|header| parse::parse_titled_item(header, Some("MUSIC_PAGE_TYPE_ARTIST"), Some(browse_id)))
+        .and_then(|header| {
+            parse::parse_titled_item(header, Some("MUSIC_PAGE_TYPE_ARTIST"), Some(browse_id))
+        })
         .and_then(|item| match item {
             MediaItem::Artist(artist) => Some(artist),
             _ => None,

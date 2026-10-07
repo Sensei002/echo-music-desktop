@@ -27,7 +27,10 @@ struct Candidate {
     accesskey: String,
     #[serde(default)]
     duration: i64,
+    // Present in the response and useful for diagnostics, but selection keys
+    // off `duration` and the lyrics come from the download endpoint.
     #[serde(default)]
+    #[allow(dead_code)]
     song: String,
 }
 
@@ -97,6 +100,11 @@ pub fn fetch(client: &reqwest::blocking::Client, query: &LyricsQuery) -> Result<
 }
 
 /// Chooses the candidate whose duration is closest to the track we are playing.
+///
+/// The search request sends the duration in **milliseconds** (see the caller),
+/// so Kugou's candidates report milliseconds too. The track duration we hold is
+/// in seconds, so it has to be scaled before the comparison — otherwise every
+/// candidate looks ~1000x too long and the shortest one always wins.
 fn pick_candidate(candidates: &[Candidate], duration: Option<u32>) -> Option<&Candidate> {
     if candidates.is_empty() {
         return None;
@@ -104,32 +112,41 @@ fn pick_candidate(candidates: &[Candidate], duration: Option<u32>) -> Option<&Ca
     let Some(duration) = duration else {
         return candidates.first();
     };
-    let target = duration as i64;
-    candidates.iter().min_by_key(|candidate| (candidate.duration - target).abs())
+    let target = duration as i64 * 1000;
+    candidates
+        .iter()
+        .min_by_key(|candidate| (candidate.duration - target).abs())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn candidate(id: &str, duration: i64) -> Candidate {
+    /// Builds a candidate from a duration expressed in **milliseconds**, matching
+    /// Kugou's wire format.
+    fn candidate_ms(id: &str, duration_ms: i64) -> Candidate {
         Candidate {
             id: id.into(),
             accesskey: "key".into(),
-            duration,
+            duration: duration_ms,
             song: "Song".into(),
         }
     }
 
     #[test]
     fn picks_the_closest_candidate() {
-        let list = vec![candidate("a", 100), candidate("b", 197_000), candidate("c", 400_000)];
+        let list = vec![
+            candidate_ms("a", 100),
+            candidate_ms("b", 197_000),
+            candidate_ms("c", 400_000),
+        ];
+        // 196 seconds is 196 000 ms, which is closest to `b`.
         assert_eq!(pick_candidate(&list, Some(196)).unwrap().id, "b");
     }
 
     #[test]
     fn falls_back_to_the_first_candidate() {
-        let list = vec![candidate("a", 1), candidate("b", 2)];
+        let list = vec![candidate_ms("a", 1), candidate_ms("b", 2)];
         assert_eq!(pick_candidate(&list, None).unwrap().id, "a");
         assert!(pick_candidate(&[], Some(1)).is_none());
     }

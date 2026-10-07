@@ -5,6 +5,7 @@
 // and the synchronised lyrics panel with the active line highlighted.
 
 import { Theme } from "../theme.slint";
+import { ScrollView } from "std-widgets.slint";
 import { CoverArt, IconButton, LyricLineData, SongData } from "../components.slint";
 
 /// The Echo clover mark, used for the primary play control.
@@ -23,22 +24,22 @@ component EchoFlower inherits Rectangle {
     Rectangle {
         x: 0; y: 0;
         width: parent.width * 0.58; height: parent.height * 0.58;
-        border-radius: width / 2; background: root.tint;
+        border-radius: self.width / 2; background: root.tint;
     }
     Rectangle {
         x: parent.width * 0.42; y: 0;
         width: parent.width * 0.58; height: parent.height * 0.58;
-        border-radius: width / 2; background: root.tint;
+        border-radius: self.width / 2; background: root.tint;
     }
     Rectangle {
         x: 0; y: parent.height * 0.42;
         width: parent.width * 0.58; height: parent.height * 0.58;
-        border-radius: width / 2; background: root.tint;
+        border-radius: self.width / 2; background: root.tint;
     }
     Rectangle {
         x: parent.width * 0.42; y: parent.height * 0.42;
         width: parent.width * 0.58; height: parent.height * 0.58;
-        border-radius: width / 2; background: root.tint;
+        border-radius: self.width / 2; background: root.tint;
     }
 
     Text {
@@ -133,7 +134,6 @@ export component PlayerScreen inherits Rectangle {
                 glyph: "⌄";
                 size: 36px;
                 font-size: 20px;
-                vertical-alignment: center;
                 clicked => { root.close(); }
             }
             VerticalLayout {
@@ -157,7 +157,6 @@ export component PlayerScreen inherits Rectangle {
             IconButton {
                 glyph: "⚙";
                 size: 36px;
-                vertical-alignment: center;
                 clicked => { root.lyrics-source-clicked(); }
             }
         }
@@ -168,7 +167,6 @@ export component PlayerScreen inherits Rectangle {
             radius: Theme.radius-card;
             height: min(parent.width, 340px);
             width: min(parent.width, 340px);
-            horizontal-alignment: center;
         }
 
         // ---- title + actions ---------------------------------------------
@@ -197,7 +195,6 @@ export component PlayerScreen inherits Rectangle {
                 font-size: 18px;
                 tint: root.liked ? Theme.primary : Theme.on-surface;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.toggle-like(); }
             }
             IconButton {
@@ -205,7 +202,6 @@ export component PlayerScreen inherits Rectangle {
                 size: 40px;
                 font-size: 18px;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.toggle-download(); }
             }
         }
@@ -244,7 +240,6 @@ export component PlayerScreen inherits Rectangle {
                 font-size: 17px;
                 tint: root.shuffle ? Theme.primary : Theme.on-surface;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.toggle-shuffle(); }
             }
             IconButton {
@@ -252,21 +247,18 @@ export component PlayerScreen inherits Rectangle {
                 size: 52px;
                 font-size: 20px;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.previous(); }
             }
             EchoFlower {
                 size: 70px;
                 glyph: root.playing ? "❙❙" : "▶";
                 clicked => { root.toggle-play(); }
-                vertical-alignment: center;
             }
             IconButton {
                 glyph: "⏭";
                 size: 52px;
                 font-size: 20px;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.next(); }
             }
             IconButton {
@@ -275,7 +267,6 @@ export component PlayerScreen inherits Rectangle {
                 font-size: 15px;
                 tint: root.repeat-mode > 0 ? Theme.primary : Theme.on-surface;
                 background-on: Theme.chip;
-                vertical-alignment: center;
                 clicked => { root.cycle-repeat(); }
             }
         }
@@ -300,7 +291,6 @@ export component PlayerScreen inherits Rectangle {
             IconButton {
                 glyph: root.lyrics-visible ? "⌃" : "⌄";
                 size: 32px;
-                vertical-alignment: center;
                 clicked => { root.toggle-lyrics(); }
             }
         }

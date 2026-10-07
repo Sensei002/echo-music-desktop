@@ -23,7 +23,11 @@ pub struct InnerTube {
 
 impl InnerTube {
     /// Builds a transport for the given region/language and optional proxy.
-    pub fn new(gl: impl Into<String>, hl: impl Into<String>, proxy: Option<String>) -> Result<Self> {
+    pub fn new(
+        gl: impl Into<String>,
+        hl: impl Into<String>,
+        proxy: Option<String>,
+    ) -> Result<Self> {
         let mut builder = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(15))
@@ -177,7 +181,10 @@ impl InnerTube {
             .header("X-YouTube-Client-Version", client.version)
             .header("X-Origin", clients::ORIGIN_YOUTUBE_MUSIC)
             .header("Referer", "https://music.youtube.com/")
-            .header("Accept-Language", format!("{},{},en;q=0.8", self.hl, self.gl))
+            .header(
+                "Accept-Language",
+                format!("{},{},en;q=0.8", self.hl, self.gl),
+            )
             .header("User-Agent", client.user_agent);
 
         if let Some(vd) = self.visitor_data() {

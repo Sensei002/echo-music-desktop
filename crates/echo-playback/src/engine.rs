@@ -27,9 +27,15 @@ const START_GRACE: Duration = Duration::from_millis(400);
 #[derive(Debug)]
 pub enum Command {
     /// Start playing a resolved stream.
-    Play { song: Box<Song>, url: String },
+    Play {
+        song: Box<Song>,
+        url: String,
+    },
     /// Replace the queue and start at `start`.
-    SetQueue { songs: Vec<Song>, start: usize },
+    SetQueue {
+        songs: Vec<Song>,
+        start: usize,
+    },
     /// Append tracks to the queue.
     Enqueue(Vec<Song>),
     /// Insert a track immediately after the current one.
@@ -47,7 +53,10 @@ pub enum Command {
     SetShuffle(bool),
     SetRepeat(RepeatMode),
     SetEqualizer(Box<EqConfig>),
-    SetCrossfade { enabled: bool, seconds: u32 },
+    SetCrossfade {
+        enabled: bool,
+        seconds: u32,
+    },
     JumpTo(usize),
     Remove(usize),
     /// Arm the sleep timer for `minutes` (0 disables).
@@ -64,9 +73,15 @@ pub enum Event {
     /// A new track began playing.
     TrackStarted(Box<Song>),
     /// Progress update (~10 Hz while playing).
-    Position { position_ms: u64, duration_ms: u64 },
+    Position {
+        position_ms: u64,
+        duration_ms: u64,
+    },
     /// The queue or its cursor changed.
-    Queue { songs: Vec<Song>, index: usize },
+    Queue {
+        songs: Vec<Song>,
+        index: usize,
+    },
     /// The last track finished and nothing else is queued.
     Ended,
     /// A recoverable error (decoder, network, device).
@@ -96,7 +111,8 @@ impl PlaybackEngine {
         let thread = thread::Builder::new()
             .name("echo-audio".into())
             .spawn(move || {
-                let engine = Engine::start(command_rx, event_tx, shared_thread, ready_tx, eq_thread);
+                let engine =
+                    Engine::start(command_rx, event_tx, shared_thread, ready_tx, eq_thread);
                 if let Some(mut engine) = engine {
                     engine.run();
                 }
@@ -432,7 +448,8 @@ impl Engine {
     fn start_track(&mut self, song: &Song, url: &str, crossfade: bool) -> Result<()> {
         let source = HttpRangeSource::open(self.http.clone(), url)?;
         let content_length = source.length();
-        let decoder = Decoder::new(source).map_err(|err| anyhow!("failed to decode the stream: {err}"))?;
+        let decoder =
+            Decoder::new(source).map_err(|err| anyhow!("failed to decode the stream: {err}"))?;
         let equalized = EqualizerSource::new(decoder, self.eq.clone());
 
         let duration = equalized
@@ -440,7 +457,8 @@ impl Engine {
             .or_else(|| content_length.map(|len| Duration::from_secs_f32(len as f32 / 16_000.0)))
             .unwrap_or(Duration::ZERO);
 
-        let sink = Sink::try_new(&self.handle).map_err(|err| anyhow!("failed to open a sink: {err}"))?;
+        let sink =
+            Sink::try_new(&self.handle).map_err(|err| anyhow!("failed to open a sink: {err}"))?;
         sink.set_volume(self.effective_volume());
 
         if crossfade && self.crossfade_enabled {

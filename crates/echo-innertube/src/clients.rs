@@ -38,7 +38,8 @@ pub const API_URL_YOUTUBE_MUSIC: &str = "https://music.youtube.com/youtubei/v1/"
 pub const ORIGIN_YOUTUBE: &str = "https://www.youtube.com";
 pub const API_URL_YOUTUBE: &str = "https://www.youtube.com/youtubei/v1/";
 
-const UA_WEB: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
+const UA_WEB: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 
 /// Desktop web music client. Used for search, browse, home, explore.
 pub const WEB_REMIX: YtClient = YtClient {

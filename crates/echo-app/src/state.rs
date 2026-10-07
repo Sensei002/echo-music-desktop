@@ -8,13 +8,24 @@ use crate::{
     AppWindow, EqBandData, LyricLineData, QuickAction, SettingRow, ShelfData, SongData, Theme,
     TileData,
 };
-use echo_core::{Album, AppPaths, Artist, Library, MediaItem, Palette, PlaybackState, Settings, Song};
+use echo_core::{Album, AppPaths, Artist, Library, MediaItem, Palette, Settings, Song};
+use echo_discord::{Activity, DiscordPresence};
 use echo_innertube::MusicClient;
 use echo_lyrics::{Lyrics, LyricsService, Provider};
 use echo_playback::{EqConfig, PlaybackEngine, BANDS};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Wraps a `Vec` in a Slint model.
+///
+/// Slint 1.18 removed the blanket `impl From<Vec<T>> for ModelRc<T>` (only
+/// `From<&[T]>` and `From<[T; N]>` remain), so every list handed to the UI has
+/// to go through an explicit `VecModel`. Keeping this in one place means the
+/// crate has a single conversion to update if Slint changes again.
+pub fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
+    ModelRc::new(VecModel::from(items))
+}
 
 /// Everything the UI needs to render a frame.
 pub struct AppState {
@@ -36,7 +47,6 @@ pub struct AppState {
     pub home: Option<echo_core::HomePage>,
     pub search: Option<echo_core::SearchResults>,
     pub library_songs: Vec<Song>,
-    pub collections: Vec<echo_core::Playlist>,
     pub favorites: Vec<Song>,
 
     // ---- playback mirrors -------------------------------------------------
@@ -48,8 +58,6 @@ pub struct AppState {
     pub duration_label: String,
     pub shuffle: bool,
     pub repeat_mode: i32,
-    pub liked: bool,
-    pub downloaded: bool,
     /// Id currently being resolved, so the engine's `TrackStarted` echo does not
     /// trigger a second resolution.
     pub pending_resolve: Option<String>,
@@ -63,6 +71,17 @@ pub struct AppState {
     pub selected_chip: i32,
     pub status: String,
     pub loading: bool,
+
+    /// Discord Rich Presence worker, present only while the setting is enabled.
+    ///
+    /// Started lazily so the app does not spawn a thread (or touch Discord's
+    /// sockets) for users who never turn the feature on.
+    pub discord: Option<DiscordPresence>,
+    /// The activity last pushed to Discord, so redundant updates are skipped
+    /// while a track is playing and only the position changes.
+    pub discord_last: Option<Activity>,
+    /// The track id the current presence was built from.
+    pub discord_track: Option<String>,
 }
 
 impl AppState {
@@ -87,7 +106,6 @@ impl AppState {
             home: None,
             search: None,
             library_songs: Vec::new(),
-            collections: Vec::new(),
             favorites: Vec::new(),
             queue: Vec::new(),
             current: None,
@@ -97,8 +115,6 @@ impl AppState {
             duration_label: "0:00".into(),
             shuffle: false,
             repeat_mode: 0,
-            liked: false,
-            downloaded: false,
             pending_resolve: None,
             lyrics_doc: None,
             lyrics_visible: true,
@@ -106,6 +122,9 @@ impl AppState {
             selected_chip: -1,
             status: String::new(),
             loading: false,
+            discord: None,
+            discord_last: None,
+            discord_track: None,
         }
     }
 
@@ -117,6 +136,28 @@ impl AppState {
     /// The current audio quality preference.
     pub fn quality(&self) -> echo_core::AudioQuality {
         self.settings.audio_quality
+    }
+
+    /// Builds the lyrics lookup request for `song`.
+    ///
+    /// Providers are matched on title + artist, so the fields are taken
+    /// verbatim from the API response rather than re-parsed from the display
+    /// subtitle. A track with no credit falls back to a placeholder rather than
+    /// an empty string, because some providers treat a blank artist as a
+    /// wildcard and return unrelated results.
+    pub fn lyrics_query_for(song: &Song) -> echo_lyrics::LyricsQuery {
+        let artist = if song.artists.is_empty() {
+            "Unknown artist".to_string()
+        } else {
+            song.artists.join(", ")
+        };
+        echo_lyrics::LyricsQuery {
+            video_id: song.id.clone(),
+            title: song.title.clone(),
+            artist,
+            album: song.album.clone(),
+            duration_secs: song.duration,
+        }
     }
 
     // ------------------------------------------------------------- covers
@@ -229,12 +270,13 @@ impl AppState {
                     title: shelf.title.clone().into(),
                     subtitle: shelf.subtitle.clone().unwrap_or_default().into(),
                     kind: kind.into(),
-                    items: shelf
-                        .items
-                        .iter()
-                        .map(|item| self.tile_data(item))
-                        .collect::<Vec<_>>()
-                        .into(),
+                    items: model(
+                        shelf
+                            .items
+                            .iter()
+                            .map(|item| self.tile_data(item))
+                            .collect::<Vec<_>>(),
+                    ),
                 }
             })
             .collect()
@@ -389,8 +431,18 @@ impl AppState {
                     echo_core::ThemeMode::Dark => "Dark",
                 },
             ),
-            nav("theme_color", "Accent colour", "Echo red by default", &s.theme_color),
-            toggle("pure_black", "Pure black", "Use OLED-friendly black surfaces", s.pure_black),
+            nav(
+                "theme_color",
+                "Accent colour",
+                "Echo red by default",
+                &s.theme_color,
+            ),
+            toggle(
+                "pure_black",
+                "Pure black",
+                "Use OLED-friendly black surfaces",
+                s.pure_black,
+            ),
             nav(
                 "ui_scale",
                 "UI scale",
@@ -400,14 +452,24 @@ impl AppState {
         ];
 
         let playback = vec![
-            toggle("crossfade", "Crossfade", "Blend the end of one track into the next", s.crossfade_enabled),
+            toggle(
+                "crossfade",
+                "Crossfade",
+                "Blend the end of one track into the next",
+                s.crossfade_enabled,
+            ),
             nav(
                 "crossfade_duration",
                 "Crossfade length",
                 "Seconds of overlap between tracks",
                 &format!("{}s", s.crossfade_duration),
             ),
-            toggle("gapless", "Gapless playback", "Remove silence between tracks", s.gapless),
+            toggle(
+                "gapless",
+                "Gapless playback",
+                "Remove silence between tracks",
+                s.gapless,
+            ),
             nav(
                 "audio_quality",
                 "Audio quality",
@@ -419,25 +481,100 @@ impl AppState {
                     echo_core::AudioQuality::Highest => "Highest",
                 },
             ),
-            toggle("data_saver", "Data saver", "Reduce bandwidth on metered connections", s.data_saver),
-            toggle("hide_videos", "Hide video songs", "Filter music videos from the feed", s.hide_video_songs),
+            toggle(
+                "data_saver",
+                "Data saver",
+                "Reduce bandwidth on metered connections",
+                s.data_saver,
+            ),
+            toggle(
+                "hide_videos",
+                "Hide video songs",
+                "Filter music videos from the feed",
+                s.hide_video_songs,
+            ),
         ];
 
         let lyrics = vec![
-            toggle("word_by_word", "Word-by-word", "Highlight each word as it is sung", s.word_by_word_lyrics),
-            toggle("translate_lyrics", "Translate lyrics", "Machine-translate into your language", s.translate_lyrics),
-            nav("lyrics_providers", "Provider order", "Tap to rotate the source order", ""),
+            toggle(
+                "word_by_word",
+                "Word-by-word",
+                "Highlight each word as it is sung",
+                s.word_by_word_lyrics,
+            ),
+            toggle(
+                "translate_lyrics",
+                "Translate lyrics",
+                "Machine-translate into your language",
+                s.translate_lyrics,
+            ),
+            nav(
+                "lyrics_providers",
+                "Provider order",
+                "Tap to rotate the source order",
+                "",
+            ),
         ];
 
         let extras = vec![
-            toggle("canvas", "Canvas animations", "Looping artwork behind the player", s.canvas_enabled),
-            toggle("echo_brain", "Echo Brain", "Auto-inject aligned tracks into the queue", s.echo_brain_enabled),
-            toggle("pause_on_mute", "Pause on mute", "Pause when the output is muted", s.pause_on_mute),
-            toggle("resume_on_bluetooth", "Resume on connect", "Resume when headphones reconnect", s.resume_on_bluetooth),
-            toggle("discord_rpc", "Discord Rich Presence", "Show what you are listening to", s.discord_rpc),
-            nav("proxy", "Proxy", "Route requests through a proxy", s.proxy.as_deref().unwrap_or("None")),
-            nav("clear_cache", "Clear cache", "Remove downloaded artwork and lyrics", ""),
-            nav("about", "About", "Echo Music Desktop", env!("CARGO_PKG_VERSION")),
+            toggle(
+                "canvas",
+                "Canvas animations",
+                "Looping artwork behind the player",
+                s.canvas_enabled,
+            ),
+            toggle(
+                "echo_brain",
+                "Echo Brain",
+                "Auto-inject aligned tracks into the queue",
+                s.echo_brain_enabled,
+            ),
+            toggle(
+                "pause_on_mute",
+                "Pause on mute",
+                "Pause when the output is muted",
+                s.pause_on_mute,
+            ),
+            toggle(
+                "resume_on_bluetooth",
+                "Resume on connect",
+                "Resume when headphones reconnect",
+                s.resume_on_bluetooth,
+            ),
+            toggle(
+                "discord_rpc",
+                "Discord Rich Presence",
+                "Show what you are listening to",
+                s.discord_rpc,
+            ),
+            nav(
+                "discord_client_id",
+                "Discord application",
+                "Your own Discord app id, or the bundled one",
+                if s.discord_client_id.trim().is_empty() {
+                    "Bundled"
+                } else {
+                    "Custom"
+                },
+            ),
+            nav(
+                "proxy",
+                "Proxy",
+                "Route requests through a proxy",
+                s.proxy.as_deref().unwrap_or("None"),
+            ),
+            nav(
+                "clear_cache",
+                "Clear cache",
+                "Remove downloaded artwork and lyrics",
+                "",
+            ),
+            nav(
+                "about",
+                "About",
+                "Echo Music Desktop",
+                env!("CARGO_PKG_VERSION"),
+            ),
         ];
 
         (appearance, playback, lyrics, extras)
@@ -493,6 +630,14 @@ impl AppState {
             palette.surface_variant.2,
         );
         let glass = slint::Color::from_argb_u8(
+            0x8c,
+            palette.surface_container.0,
+            palette.surface_container.1,
+            palette.surface_container.2,
+        );
+        // Same tint as `glass` but more opaque — the floating tab bar uses it so
+        // content scrolling underneath stays readable.
+        let glass_strong = slint::Color::from_argb_u8(
             0xd9,
             palette.surface_container.0,
             palette.surface_container.1,
@@ -634,13 +779,113 @@ impl AppState {
             engine.send(echo_playback::Command::SetEqualizer(Box::new(config)));
         }
     }
+
+    // ------------------------------------------------------- Discord presence
+
+    /// Starts or stops the presence worker to match the current setting.
+    ///
+    /// Safe to call on every settings change: it is a no-op when the desired
+    /// and actual state already agree, so the toggle handler does not need to
+    /// track transitions itself.
+    pub fn sync_discord(&mut self) {
+        match (self.settings.discord_rpc, self.discord.is_some()) {
+            (true, false) => {
+                let client_id = self.settings.discord_application_id();
+                log::info!("enabling Discord Rich Presence (application {client_id})");
+                self.discord = Some(DiscordPresence::start(&client_id));
+                // Push whatever is already on screen so enabling the toggle
+                // while a track plays updates Discord immediately.
+                self.update_discord(true);
+            }
+            (false, true) => {
+                log::info!("disabling Discord Rich Presence");
+                self.discord = None;
+                self.discord_last = None;
+                self.discord_track = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Publishes the current track to Discord.
+    ///
+    /// When `force` is false the update is skipped if nothing meaningful
+    /// changed since the last push. The player polls at ~120 ms, so without
+    /// this filter the presence would be rewritten eight times a second — which
+    /// Discord rate-limits, and which is pointless because the protocol already
+    /// extrapolates the progress bar from the `start` timestamp.
+    pub fn update_discord(&mut self, force: bool) {
+        let Some(discord) = &self.discord else {
+            return;
+        };
+
+        let activity = self.discord_activity();
+        let track = activity
+            .as_ref()
+            .map(|_| self.current.as_ref().map(|s| s.id.clone()));
+        let track = track.flatten();
+
+        // A paused track keeps its frozen position, so the only field that can
+        // still change is `playing` — comparing the whole struct catches that.
+        let unchanged = !force
+            && self.discord_track == track
+            && match (&self.discord_last, &activity) {
+                (Some(previous), Some(next)) => {
+                    previous.title == next.title
+                        && previous.artist == next.artist
+                        && previous.album == next.album
+                        && previous.duration_secs == next.duration_secs
+                        && previous.playing == next.playing
+                }
+                (None, None) => true,
+                _ => false,
+            };
+        if unchanged {
+            return;
+        }
+
+        self.discord_track = track;
+        self.discord_last = activity.clone();
+
+        match activity {
+            // Clearing is intentional: with nothing playing the presence should
+            // disappear rather than show a stale track.
+            None => discord.clear(),
+            Some(activity) => discord.set_activity(activity),
+        }
+    }
+
+    /// Builds the presence payload for the current track, if there is one.
+    fn discord_activity(&self) -> Option<Activity> {
+        let song = self.current.as_ref()?;
+        let position = if self.settings.discord_show_timestamps {
+            self.engine
+                .as_ref()
+                .map(|engine| engine.snapshot().position_ms / 1000)
+                .unwrap_or(self.progress.max(0.0) as u64)
+        } else {
+            0
+        };
+
+        Some(Activity {
+            title: song.title.clone(),
+            artist: song.artist_line(),
+            album: song.album.clone(),
+            duration_secs: song.duration,
+            position_secs: position,
+            playing: self.is_playing,
+            artwork_url: song.thumbnail.clone(),
+        })
+    }
 }
 
 /// Groups songs into albums (by album id, falling back to the album name).
 pub fn albums_from_songs(songs: &[Song]) -> Vec<Album> {
     let mut albums: Vec<Album> = Vec::new();
     for song in songs {
-        let Some(name) = song.album.clone() else { continue };
+        let Some(name) = song.album.clone() else {
+            continue;
+        };
         let id = song
             .album_id
             .clone()
@@ -682,18 +927,6 @@ pub fn artists_from_songs(songs: &[Song]) -> Vec<Artist> {
     artists
 }
 
-/// Human-readable label for a transport state.
-pub fn state_label(state: PlaybackState) -> &'static str {
-    match state {
-        PlaybackState::Idle => "Idle",
-        PlaybackState::Loading => "Loading",
-        PlaybackState::Buffering => "Buffering",
-        PlaybackState::Playing => "Playing",
-        PlaybackState::Paused => "Paused",
-        PlaybackState::Stopped => "Stopped",
-    }
-}
-
 /// The greeting shown at the top of the home feed, derived from the clock.
 pub fn greeting() -> String {
     let hour = chrono::Timelike::hour(&chrono::Local::now());
@@ -706,16 +939,12 @@ pub fn greeting() -> String {
     .to_string()
 }
 
-/// The window's current tab index.
-pub fn tab_index(window: &AppWindow) -> i32 {
-    window.get_current_tab()
-}
-
 /// Converts a Rust string slice into a Slint model of strings.
 pub fn string_model(values: &[String]) -> slint::ModelRc<SharedString> {
-    values
-        .iter()
-        .map(|value| SharedString::from(value.as_str()))
-        .collect::<Vec<_>>()
-        .into()
+    model(
+        values
+            .iter()
+            .map(|value| SharedString::from(value.as_str()))
+            .collect::<Vec<_>>(),
+    )
 }

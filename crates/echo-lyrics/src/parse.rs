@@ -23,9 +23,8 @@ pub enum LyricsFormat {
 
 static LRC_TIME: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]").expect("valid regex"));
-static WORD_TIME: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>").expect("valid regex")
-});
+static WORD_TIME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>").expect("valid regex"));
 static TTML_PARA: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?is)<p\b([^>]*)>(.*?)</p>").expect("valid regex"));
 static TTML_SPAN: Lazy<Regex> =
@@ -83,11 +82,7 @@ pub fn parse_lrc(text: &str) -> Vec<LyricLine> {
         }
 
         // Everything after the final timestamp is the lyric body.
-        let content_start = LRC_TIME
-            .find_iter(raw)
-            .last()
-            .map(|m| m.end())
-            .unwrap_or(0);
+        let content_start = LRC_TIME.find_iter(raw).last().map(|m| m.end()).unwrap_or(0);
         let content = &raw[content_start..];
 
         let words = parse_words(content);
@@ -137,7 +132,10 @@ fn parse_words(content: &str) -> Vec<LyricWord> {
 
     let mut words = Vec::with_capacity(tags.len());
     for (index, (_, tag_end, start)) in tags.iter().enumerate() {
-        let text_end = tags.get(index + 1).map(|next| next.0).unwrap_or(content.len());
+        let text_end = tags
+            .get(index + 1)
+            .map(|next| next.0)
+            .unwrap_or(content.len());
         let text = content[*tag_end..text_end].to_string();
         words.push(LyricWord {
             text,
@@ -254,11 +252,19 @@ pub fn parse_time_value(value: &str) -> Option<u64> {
         return raw.trim().parse::<f64>().ok().map(|v| v.max(0.0) as u64);
     }
     if let Some(raw) = value.strip_suffix('s') {
-        return raw.trim().parse::<f64>().ok().map(|v| (v * 1000.0).max(0.0) as u64);
+        return raw
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v * 1000.0).max(0.0) as u64);
     }
     if let Some(raw) = value.strip_suffix('t') {
         // TTML ticks are 10 000 per second in YouTube's output.
-        return raw.trim().parse::<f64>().ok().map(|v| (v / 10.0).max(0.0) as u64);
+        return raw
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v / 10.0).max(0.0) as u64);
     }
     if value.contains(':') {
         let mut total = 0f64;
@@ -267,7 +273,10 @@ pub fn parse_time_value(value: &str) -> Option<u64> {
         }
         return Some((total * 1000.0).max(0.0) as u64);
     }
-    value.parse::<f64>().ok().map(|v| (v * 1000.0).max(0.0) as u64)
+    value
+        .parse::<f64>()
+        .ok()
+        .map(|v| (v * 1000.0).max(0.0) as u64)
 }
 
 /// Removes markup and decodes the XML entities lyrics documents use.

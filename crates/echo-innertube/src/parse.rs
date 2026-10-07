@@ -110,7 +110,10 @@ fn absorb_runs(parts: &mut ItemParts, runs: &[Value]) {
         }
         let lower = text.to_lowercase();
         if lower.ends_with(" songs") || lower.ends_with(" song") {
-            if let Some(count) = text.split_whitespace().next().and_then(|n| n.parse::<u32>().ok())
+            if let Some(count) = text
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<u32>().ok())
             {
                 parts.song_count = Some(count);
             }
@@ -238,8 +241,16 @@ fn parse_items_from(contents: &[Value]) -> Vec<MediaItem> {
             entry
                 .get("musicResponsiveListItemRenderer")
                 .and_then(parse_responsive_list_item)
-                .or_else(|| entry.get("musicTwoRowItemRenderer").and_then(parse_two_row_item))
-                .or_else(|| entry.get("musicCardShelfRenderer").and_then(|c| parse_card_header(c)))
+                .or_else(|| {
+                    entry
+                        .get("musicTwoRowItemRenderer")
+                        .and_then(parse_two_row_item)
+                })
+                .or_else(|| {
+                    entry
+                        .get("musicCardShelfRenderer")
+                        .and_then(parse_card_header)
+                })
         })
         .collect()
 }
@@ -279,7 +290,7 @@ fn parse_carousel(carousel: &Value) -> Option<Shelf> {
             .filter(|s| !s.is_empty()),
         browse_id: header
             .and_then(|h| h.get("moreContentButton"))
-            .and_then(|b| browse_id_of(b)),
+            .and_then(browse_id_of),
         items,
     })
 }
@@ -421,7 +432,11 @@ fn collect_suggestions_into(value: &Value, out: &mut Vec<String>) {
                 if key == "searchSuggestionRenderer" || key == "musicSuggestionRenderer" {
                     let text = child
                         .get("suggestion")
-                        .or_else(|| child.get("navigationEndpoint").and_then(|_| child.get("suggestion")))
+                        .or_else(|| {
+                            child
+                                .get("navigationEndpoint")
+                                .and_then(|_| child.get("suggestion"))
+                        })
                         .map(text_of)
                         .unwrap_or_default();
                     let text = text.trim();
@@ -489,7 +504,10 @@ pub fn parse_queue_item(item: &Value) -> Option<Song> {
         artist_ids,
         album: None,
         album_id: None,
-        duration: item.get("lengthText").map(text_of).and_then(|t| parse_clock(&t)),
+        duration: item
+            .get("lengthText")
+            .map(text_of)
+            .and_then(|t| parse_clock(&t)),
         thumbnail: best_thumbnail(item),
         set_video_id: None,
         is_explicit: is_explicit(item),

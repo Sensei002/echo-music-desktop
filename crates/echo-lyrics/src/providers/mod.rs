@@ -150,7 +150,16 @@ pub(crate) fn clean_title(title: &str) -> String {
 /// Reduces a multi-artist credit to the primary artist.
 pub(crate) fn clean_artist(artist: &str) -> String {
     const SEPARATORS: [&str; 10] = [
-        " & ", " and ", ", ", " x ", " X ", " feat. ", " feat ", " ft. ", " ft ", " featuring ",
+        " & ",
+        " and ",
+        ", ",
+        " x ",
+        " X ",
+        " feat. ",
+        " feat ",
+        " ft. ",
+        " ft ",
+        " featuring ",
     ];
     let mut cleaned = artist.trim().to_string();
     for separator in SEPARATORS {

@@ -98,19 +98,18 @@ impl HttpRangeSource {
             .get(&self.url)
             .header("Range", format!("bytes={}-{}", self.position, end))
             .send()
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("range request failed: {err}")))?;
+            .map_err(|err| io::Error::other(format!("range request failed: {err}")))?;
 
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("range request returned HTTP {status}"),
-            ));
+            return Err(io::Error::other(format!(
+                "range request returned HTTP {status}"
+            )));
         }
 
         let bytes = response
             .bytes()
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("range body failed: {err}")))?;
+            .map_err(|err| io::Error::other(format!("range body failed: {err}")))?;
         self.window.extend_from_slice(&bytes);
         Ok(())
     }

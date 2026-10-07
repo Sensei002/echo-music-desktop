@@ -1,8 +1,8 @@
 //! Lyrics orchestration: provider ordering, caching and translation hooks.
 
 use crate::model::Lyrics;
-use crate::providers::{Provider, RawLyrics};
 use crate::parse::parse_lyrics;
+use crate::providers::{Provider, RawLyrics};
 use anyhow::Result;
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -95,7 +95,11 @@ impl LyricsService {
                 Ok(Some(raw)) => {
                     let lyrics = materialise(raw, provider.id());
                     if !lyrics.is_empty() {
-                        log::debug!("lyrics for `{}` from {}", query.title, provider.display_name());
+                        log::debug!(
+                            "lyrics for `{}` from {}",
+                            query.title,
+                            provider.display_name()
+                        );
                         result = Some(lyrics);
                         break;
                     }
@@ -112,11 +116,7 @@ impl LyricsService {
     }
 
     /// Fetches from one specific provider (used by the "source" switcher).
-    pub fn fetch_from(
-        &self,
-        provider: Provider,
-        query: &LyricsQuery,
-    ) -> Result<Option<Lyrics>> {
+    pub fn fetch_from(&self, provider: Provider, query: &LyricsQuery) -> Result<Option<Lyrics>> {
         Ok(provider
             .fetch(&self.client, query)?
             .map(|raw| materialise(raw, provider.id()))

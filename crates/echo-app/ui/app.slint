@@ -6,7 +6,10 @@
 // through a callback.
 
 // Re-exported so the Rust side can drive the palette through the global.
+// The explicit import below is required too: `export ... from` only re-exports,
+// it does not bring the name into this file's scope.
 export { Theme } from "theme.slint";
+import { Theme } from "theme.slint";
 import {
     EqBandData, LyricLineData, MiniPlayer, QuickAction, SettingRow, ShelfData,
     SongData, TabBar, TileData, TopBar,
@@ -21,10 +24,13 @@ export component AppWindow inherits Window {
     title: "Echo Music";
     background: Theme.background;
     default-font-size: 14px;
+    // `width`/`height` cannot be combined with `min-*` in Slint 1.18; the
+    // preferred size carries the default and the minimums keep the layout sane
+    // when the user shrinks the window.
     min-width: 460px;
     min-height: 640px;
-    width: 480px;
-    height: 860px;
+    preferred-width: 480px;
+    preferred-height: 860px;
 
     // ---- navigation ------------------------------------------------------
     in-out property <int> current-tab: 0;

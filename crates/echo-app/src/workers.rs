@@ -4,7 +4,7 @@
 //! with an [`Update`] message. The UI thread drains those messages on a timer,
 //! so the Slint event loop is never blocked.
 
-use echo_core::{AlbumPage, ArtistPage, HomePage, Library, Playlist, PlaylistPage, SearchResults, Song};
+use echo_core::{AlbumPage, ArtistPage, HomePage, Library, PlaylistPage, SearchResults, Song};
 use echo_innertube::{MusicClient, SearchFilter};
 use echo_lyrics::{Lyrics, LyricsQuery, LyricsService};
 use std::path::PathBuf;
@@ -21,23 +21,20 @@ pub enum Update {
     Artist(Result<ArtistPage, String>),
     Playlist(Result<PlaylistPage, String>),
     /// A stream URL was resolved and playback can begin.
-    StreamReady { song: Song, url: String },
+    StreamReady {
+        song: Song,
+        url: String,
+    },
     StreamFailed(String),
     Lyrics(Result<Option<Lyrics>, String>),
-    Songs(Vec<Song>),
-    Playlists(Vec<Playlist>),
     /// Artwork finished downloading; the UI should decode and rebuild models.
     Covers(Vec<String>),
     Status(String),
-    Error(String),
 }
 
 /// Spawns a named worker thread, logging rather than panicking on failure.
 fn spawn<F: FnOnce() + Send + 'static>(name: &str, job: F) {
-    if let Err(err) = std::thread::Builder::new()
-        .name(name.into())
-        .spawn(job)
-    {
+    if let Err(err) = std::thread::Builder::new().name(name.into()).spawn(job) {
         log::warn!("failed to spawn the `{name}` worker: {err}");
     }
 }
@@ -46,17 +43,111 @@ fn fail<T>(result: anyhow::Result<T>) -> Result<T, String> {
     result.map_err(|err| format!("{err:#}"))
 }
 
+/// A handle to everything the background jobs need.
+///
+/// Each job is a free function taking its own dependencies; this type bundles
+/// the shared ones (HTTP client, lyrics service, library, cache directory and
+/// the update channel) so the UI code can call `workers.home()` instead of
+/// threading five arguments through every call site. It is cheap to clone —
+/// every field is an `Arc` or a `Sender` — so closures can capture it directly.
+#[derive(Clone)]
+pub struct Workers {
+    client: Arc<MusicClient>,
+    lyrics: Arc<LyricsService>,
+    library: Library,
+    http: Arc<reqwest::blocking::Client>,
+    artwork_dir: PathBuf,
+    downloads_dir: PathBuf,
+    tx: Sender<Update>,
+}
+
+impl Workers {
+    pub fn new(
+        client: Arc<MusicClient>,
+        lyrics: Arc<LyricsService>,
+        library: Library,
+        paths: &echo_core::AppPaths,
+        tx: Sender<Update>,
+    ) -> Self {
+        Self {
+            client,
+            lyrics,
+            library,
+            http: Arc::new(crate::http_client()),
+            artwork_dir: paths.artwork_cache_dir(),
+            downloads_dir: paths.downloads_dir(),
+            tx,
+        }
+    }
+
+    /// Loads the personalised home feed.
+    pub fn home(&self) {
+        home(self.client.clone(), self.tx.clone());
+    }
+
+    /// Runs a search.
+    pub fn search(&self, query: String, filter: SearchFilter) {
+        search(self.client.clone(), self.tx.clone(), query, filter);
+    }
+
+    /// Fetches type-ahead suggestions.
+    pub fn suggestions(&self, query: String) {
+        suggestions(self.client.clone(), self.tx.clone(), query);
+    }
+
+    /// Opens an arbitrary collection (album, artist, playlist or saved set).
+    pub fn collection(&self, id: String, kind: String) {
+        match kind.as_str() {
+            "album" => album(self.client.clone(), self.tx.clone(), id),
+            "artist" => artist(self.client.clone(), self.tx.clone(), id),
+            // Playlists and anything unrecognised go through the playlist
+            // endpoint, which also resolves saved library ids.
+            _ => playlist(self.client.clone(), self.tx.clone(), id),
+        }
+    }
+
+    /// Resolves a playable stream URL for `song`.
+    pub fn resolve(&self, song: Song, quality: echo_core::AudioQuality) {
+        resolve_stream(self.client.clone(), self.tx.clone(), song, quality);
+    }
+
+    /// Fetches lyrics for the track described by `query`.
+    pub fn lyrics(&self, query: LyricsQuery) {
+        lyrics(self.lyrics.clone(), self.tx.clone(), query);
+    }
+
+    /// Downloads artwork for `urls` that are not cached yet.
+    pub fn covers(&self, urls: Vec<String>) {
+        covers(
+            self.http.clone(),
+            self.artwork_dir.clone(),
+            self.tx.clone(),
+            urls,
+        );
+    }
+
+    /// Saves a track offline at the requested quality.
+    pub fn download(&self, song: Song, quality: echo_core::AudioQuality) {
+        download(
+            self.client.clone(),
+            self.library.clone(),
+            self.downloads_dir.clone(),
+            self.tx.clone(),
+            song,
+            quality,
+        );
+    }
+
+    /// Empties the artwork and lyrics caches.
+    pub fn clear_cache(&self) {
+        clear_cache(self.artwork_dir.clone(), self.tx.clone());
+    }
+}
+
 /// Loads the personalised home feed.
 pub fn home(client: Arc<MusicClient>, tx: Sender<Update>) {
     spawn("echo-home", move || {
         let _ = tx.send(Update::Home(fail(client.home())));
-    });
-}
-
-/// Loads the explore page (used when the home feed is empty).
-pub fn explore(client: Arc<MusicClient>, tx: Sender<Update>) {
-    spawn("echo-explore", move || {
-        let _ = tx.send(Update::Home(fail(client.explore())));
     });
 }
 
@@ -128,56 +219,6 @@ pub fn lyrics(service: Arc<LyricsService>, tx: Sender<Update>, query: LyricsQuer
     });
 }
 
-/// Loads the liked songs list.
-pub fn liked_songs(library: Library, tx: Sender<Update>) {
-    spawn("echo-liked", move || {
-        let songs = library.liked_songs().unwrap_or_default();
-        let _ = tx.send(Update::Songs(songs));
-    });
-}
-
-/// Loads the play history.
-pub fn history(library: Library, tx: Sender<Update>) {
-    spawn("echo-history", move || {
-        let songs = library.history(200).unwrap_or_default();
-        let _ = tx.send(Update::Songs(songs));
-    });
-}
-
-/// Loads the downloaded tracks.
-pub fn downloads(library: Library, tx: Sender<Update>) {
-    spawn("echo-downloads", move || {
-        let songs = library
-            .downloads()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|record| record.song)
-            .collect();
-        let _ = tx.send(Update::Songs(songs));
-    });
-}
-
-/// Loads the most played tracks.
-pub fn top_songs(library: Library, tx: Sender<Update>) {
-    spawn("echo-top", move || {
-        let _ = tx.send(Update::Songs(library.top_songs(50).unwrap_or_default()));
-    });
-}
-
-/// Loads the least played tracks.
-pub fn bottom_songs(library: Library, tx: Sender<Update>) {
-    spawn("echo-bottom", move || {
-        let _ = tx.send(Update::Songs(library.bottom_songs(50).unwrap_or_default()));
-    });
-}
-
-/// Loads the user's playlists.
-pub fn playlists(library: Library, tx: Sender<Update>) {
-    spawn("echo-playlists", move || {
-        let _ = tx.send(Update::Playlists(library.playlists().unwrap_or_default()));
-    });
-}
-
 /// Downloads artwork for a batch of URLs, then tells the UI to decode them.
 pub fn covers(
     http: Arc<reqwest::blocking::Client>,
@@ -201,10 +242,71 @@ pub fn covers(
     });
 }
 
-/// Collects every artwork URL referenced by a set of items.
-pub fn cover_urls_for_items(items: &[echo_core::MediaItem]) -> Vec<String> {
-    items
-        .iter()
-        .filter_map(|item| item.thumbnail().map(str::to_string))
+/// Saves a track offline and records it in the library.
+pub fn download(
+    client: Arc<MusicClient>,
+    library: Library,
+    dir: PathBuf,
+    tx: Sender<Update>,
+    song: Song,
+    quality: echo_core::AudioQuality,
+) {
+    spawn("echo-download", move || {
+        let result = (|| -> anyhow::Result<(PathBuf, u64)> {
+            let resolved = client.resolve(&song.id, quality)?;
+            let target = dir.join(format!("{}.m4a", sanitize(&song.id)));
+            std::fs::create_dir_all(&dir)
+                .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", dir.display()))?;
+
+            let mut response = reqwest::blocking::get(&resolved.stream.url)
+                .map_err(|err| anyhow::anyhow!("download request failed: {err}"))?;
+            if !response.status().is_success() {
+                anyhow::bail!("download returned HTTP {}", response.status());
+            }
+
+            let mut file = std::fs::File::create(&target)
+                .map_err(|err| anyhow::anyhow!("failed to create {}: {err}", target.display()))?;
+            let size = std::io::copy(&mut response, &mut file)
+                .map_err(|err| anyhow::anyhow!("failed to write the track: {err}"))?;
+            Ok((target, size))
+        })();
+
+        let message = match result {
+            Ok((path, size)) => {
+                if let Err(err) = library.add_download(
+                    &song,
+                    &path.to_string_lossy(),
+                    Some(&format!("{quality:?}")),
+                    Some(size),
+                ) {
+                    log::warn!("could not record the download: {err:#}");
+                }
+                format!("Saved `{}` offline", song.title)
+            }
+            Err(err) => format!("Download failed: {err:#}"),
+        };
+        let _ = tx.send(Update::Status(message));
+    });
+}
+
+/// Deletes the cached artwork and lyrics files.
+pub fn clear_cache(artwork_dir: PathBuf, tx: Sender<Update>) {
+    spawn("echo-cache", move || {
+        let removed = crate::covers::clear(&artwork_dir).unwrap_or(0);
+        let _ = tx.send(Update::Status(format!("Cleared {removed} cached files")));
+    });
+}
+
+/// Replaces characters that are unsafe in a file name.
+fn sanitize(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

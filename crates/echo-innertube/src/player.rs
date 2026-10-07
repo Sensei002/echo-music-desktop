@@ -160,8 +160,14 @@ impl StreamResolver {
                 .get("audioSampleRate")
                 .and_then(Value::as_str)
                 .and_then(|v| v.parse().ok()),
-            channels: best.get("audioChannels").and_then(Value::as_u64).map(|v| v as u32),
-            content_length: best.get("contentLength").and_then(Value::as_str).and_then(|v| v.parse().ok()),
+            channels: best
+                .get("audioChannels")
+                .and_then(Value::as_u64)
+                .map(|v| v as u32),
+            content_length: best
+                .get("contentLength")
+                .and_then(Value::as_str)
+                .and_then(|v| v.parse().ok()),
             client: client.friendly_name.to_string(),
         };
 
@@ -334,7 +340,7 @@ mod tests {
 
     #[test]
     fn picks_the_closest_bitrate() {
-        let formats = vec![
+        let formats = [
             json!({"mimeType": "audio/mp4", "bitrate": 64000}),
             json!({"mimeType": "audio/mp4", "bitrate": 128000}),
             json!({"mimeType": "audio/mp4", "bitrate": 256000}),
