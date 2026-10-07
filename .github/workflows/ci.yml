@@ -49,6 +49,13 @@ jobs:
       # GitHub exposes just the MSYS2 root as an environment variable, so the
       # candidates are filtered by string rather than by reading the whole PATH
       # back through PowerShell.
+      #
+      # Do NOT add a "verify link.exe is the MSVC one" probe here. A plain pwsh
+      # step runs before the Rust toolchain loader initialises the MSVC
+      # environment, so `link.exe` is legitimately absent at this point and the
+      # probe fails on a perfectly healthy runner. Cargo locates the MSVC
+      # linker itself once it starts building; if the wrong one ever wins
+      # again, the build step below is what reports it.
       - name: Put the MSVC linker ahead of Git's
         shell: pwsh
         run: |
@@ -77,21 +84,6 @@ jobs:
             return $true
           }
           "PATH=$($keep -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Fail loudly if the wrong linker is still winning, instead of letting it
-      # surface later as a confusing build error.
-      - name: Verify the linker is the MSVC one
-        shell: pwsh
-        run: |
-          $link = Get-Command link.exe -ErrorAction SilentlyContinue
-          if (-not $link) {
-            Write-Host 'link.exe is not on PATH yet; the MSVC environment was not initialised.'
-            exit 1
-          }
-          Write-Host "link.exe -> $($link.Source)"
-          if ($link.Source -match '\\Git\\|\\usr\\bin') {
-            throw "link.exe resolved to $($link.Source) - that is GNU coreutils, not MSVC."
-          }
 
       - name: Check formatting
         run: cargo fmt --all -- --check
